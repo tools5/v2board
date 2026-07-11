@@ -185,6 +185,7 @@ class OauthController extends Controller
         $user['alive_ip'] = $onlineStats['alive_ip'];
         $user['ips'] = $onlineStats['ips'];
         $user['is_online'] = $onlineStats['is_online'];
+        $user['subscribe_url'] = $user->token ? Helper::getSubscribeUrl($user->token) : null;
 
         $allBindings = UserOauth::where('user_id', $user->id)->get()->map(function ($item) {
             return $this->formatBindingSummary($item);

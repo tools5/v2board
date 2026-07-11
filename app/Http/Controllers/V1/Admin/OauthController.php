@@ -24,14 +24,16 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * 后台 OAuth 用户管理：数据主表为 v2_oauth_user（与用户管理 v2_user 列表分离）。
- * 套餐/流量/封禁等运行数据仍读写关联的系统账号（v2_user），以支持订阅与节点。
+ * 后台 OAuth 绑定管理：
+ * - 列表主数据来自 v2_user_oauth（含「邮箱用户后绑定」与「OAuth 自动注册」）
+ * - OAuth 自动注册用户另有 v2_oauth_user 标记，不在「用户管理」列表中
+ * - 套餐/流量/封禁等运行数据读写关联的 v2_user
  */
 class OauthController extends Controller
 {
     public function fetch(Request $request)
     {
-        $this->assertOauthTable();
+        $this->assertBindingTable();
 
         $current = max(1, (int)$request->input('current', 1));
         $pageSize = (int)$request->input('pageSize', 10);
@@ -53,59 +55,24 @@ class OauthController extends Controller
         if (!in_array($sort, $allowedSort, true)) {
             $sort = 'created_at';
         }
-        // 兼容前端旧 sort 字段
-        if ($sort === 'provider') {
-            $sort = 'primary_provider';
+        if ($sort === 'primary_provider') {
+            $sort = 'provider';
         }
-        if ($sort === 'provider_user_id') {
-            $sort = 'primary_provider_user_id';
+        if ($sort === 'primary_provider_user_id') {
+            $sort = 'provider_user_id';
         }
 
-        $query = OauthUser::query()
-            ->from('v2_oauth_user as ou')
-            ->leftJoin('v2_user as u', 'u.id', '=', 'ou.user_id')
-            ->select([
-                'ou.id',
-                'ou.user_id',
-                'ou.email as oauth_email',
-                'ou.primary_provider',
-                'ou.primary_provider_user_id',
-                'ou.primary_provider_username',
-                'ou.primary_provider_email',
-                'ou.primary_provider_avatar',
-                'ou.password_never_set',
-                'ou.remarks as oauth_remarks',
-                'ou.created_at',
-                'ou.updated_at',
-                'u.email',
-                'u.banned',
-                'u.plan_id',
-                'u.transfer_enable',
-                'u.u',
-                'u.d',
-                'u.device_limit',
-                'u.expired_at',
-                'u.balance',
-                'u.commission_balance',
-                'u.telegram_id',
-                'u.token',
-                'u.uuid',
-                'u.remarks',
-                'u.is_admin',
-                'u.is_staff',
-                'u.invite_user_id',
-                'u.created_at as user_created_at',
-                'u.last_login_at',
-            ]);
-
+        $query = $this->buildBindingListQuery();
         $this->applyFilters($request, $query);
 
         if (in_array($sort, ['banned', 'expired_at'], true)) {
             $query->orderBy('u.' . $sort, $sortType);
         } elseif ($sort === 'email') {
-            $query->orderBy('ou.email', $sortType);
+            $query->orderBy('u.email', $sortType);
+        } elseif (in_array($sort, ['provider', 'provider_user_id', 'created_at', 'updated_at', 'id', 'user_id'], true)) {
+            $query->orderBy('ub.' . $sort, $sortType);
         } else {
-            $query->orderBy('ou.' . $sort, $sortType);
+            $query->orderBy('ub.created_at', $sortType);
         }
 
         $total = (clone $query)->count();
@@ -114,7 +81,7 @@ class OauthController extends Controller
         $plans = Plan::get()->keyBy('id');
         $data = [];
         foreach ($rows as $row) {
-            $data[] = $this->formatOauthUserRow($row, $plans);
+            $data[] = $this->formatBindingListRow($row, $plans);
         }
 
         return response([
@@ -126,33 +93,64 @@ class OauthController extends Controller
 
     public function getInfoById(Request $request)
     {
-        $this->assertOauthTable();
+        $this->assertBindingTable();
         $id = (int)$request->input('id');
-        if ($id <= 0) {
+        $userId = (int)$request->input('user_id', 0);
+        if ($id <= 0 && $userId <= 0) {
             abort(500, '参数错误');
         }
 
-        $oauthUser = OauthUser::find($id);
-        if (!$oauthUser) {
-            abort(500, 'OAuth 用户不存在');
+        $binding = null;
+        $oauthUser = null;
+        $user = null;
+
+        if ($id > 0) {
+            $binding = UserOauth::find($id);
+            if ($binding) {
+                $user = User::find($binding->user_id);
+            } elseif (Schema::hasTable('v2_oauth_user')) {
+                $oauthUser = OauthUser::find($id);
+                if ($oauthUser) {
+                    $user = User::find($oauthUser->user_id);
+                }
+            }
         }
 
-        $user = User::find($oauthUser->user_id);
+        if (!$user && $userId > 0) {
+            $user = User::find($userId);
+        }
+
         if (!$user) {
-            abort(500, '关联系统账号不存在');
+            abort(500, '用户或绑定不存在');
         }
 
         if ($user->invite_user_id) {
             $user['invite_user'] = User::find($user->invite_user_id);
         }
 
+        if (!$oauthUser && Schema::hasTable('v2_oauth_user')) {
+            $oauthUser = OauthUser::where('user_id', $user->id)->first();
+        }
+
         $allBindings = UserOauth::where('user_id', $user->id)->get()->map(function ($item) {
             return $this->formatBindingSummary($item);
         })->values();
 
+        $primaryBinding = $binding;
+        if (!$primaryBinding) {
+            $primaryBinding = UserOauth::where('user_id', $user->id)->orderBy('id', 'asc')->first();
+        }
+
+        $primaryProvider = $primaryBinding
+            ? $primaryBinding->provider
+            : ($oauthUser ? $oauthUser->primary_provider : null);
+        $primaryProviderUserId = $primaryBinding
+            ? $primaryBinding->provider_user_id
+            : ($oauthUser ? $oauthUser->primary_provider_user_id : null);
+
         return response([
             'data' => [
-                'oauth_user' => [
+                'oauth_user' => $oauthUser ? [
                     'id' => $oauthUser->id,
                     'user_id' => $oauthUser->user_id,
                     'email' => $oauthUser->email,
@@ -161,18 +159,21 @@ class OauthController extends Controller
                     'external_id_label' => $this->externalIdLabel($oauthUser->primary_provider),
                     'password_never_set' => (int)$oauthUser->password_never_set,
                     'remarks' => $oauthUser->remarks,
-                ],
-                'binding' => [
-                    'id' => $oauthUser->id,
-                    'user_id' => $oauthUser->user_id,
-                    'provider' => $oauthUser->primary_provider,
-                    'provider_name' => (OauthProviderRegistry::get($oauthUser->primary_provider)['name'] ?? $oauthUser->primary_provider),
-                    'provider_user_id' => $oauthUser->primary_provider_user_id,
-                    'external_id_label' => $this->externalIdLabel($oauthUser->primary_provider),
-                    'external_id' => $oauthUser->primary_provider_user_id,
-                ],
+                ] : null,
+                'binding' => $primaryBinding ? $this->formatBindingSummary($primaryBinding) : (
+                    $primaryProvider ? [
+                        'id' => null,
+                        'user_id' => $user->id,
+                        'provider' => $primaryProvider,
+                        'provider_name' => (OauthProviderRegistry::get($primaryProvider)['name'] ?? $primaryProvider),
+                        'provider_user_id' => $primaryProviderUserId,
+                        'external_id_label' => $this->externalIdLabel((string)$primaryProvider),
+                        'external_id' => $primaryProviderUserId,
+                    ] : null
+                ),
                 'user' => $user,
                 'bindings' => $allBindings,
+                'is_oauth_managed' => (bool)$oauthUser,
             ],
         ]);
     }
@@ -185,9 +186,14 @@ class OauthController extends Controller
             abort(500, '用户不存在');
         }
 
-        $oauthUser = OauthUser::where('user_id', $user->id)->first();
-        if (!$oauthUser) {
-            abort(500, '该用户不是 OAuth 独立用户');
+        $hasBinding = Schema::hasTable('v2_user_oauth')
+            && UserOauth::where('user_id', $user->id)->exists();
+        $oauthUser = Schema::hasTable('v2_oauth_user')
+            ? OauthUser::where('user_id', $user->id)->first()
+            : null;
+
+        if (!$hasBinding && !$oauthUser) {
+            abort(500, '该用户没有第三方绑定记录');
         }
 
         if (User::where('email', $params['email'])->first() && $user->email !== $params['email']) {
@@ -225,11 +231,13 @@ class OauthController extends Controller
 
         try {
             $user->update($params);
-            $oauthUser->email = $params['email'];
-            if (array_key_exists('remarks', $params)) {
-                $oauthUser->remarks = $params['remarks'];
+            if ($oauthUser) {
+                $oauthUser->email = $params['email'];
+                if (array_key_exists('remarks', $params)) {
+                    $oauthUser->remarks = $params['remarks'];
+                }
+                $oauthUser->save();
             }
-            $oauthUser->save();
         } catch (\Exception $e) {
             abort(500, '保存失败');
         }
@@ -241,8 +249,7 @@ class OauthController extends Controller
 
     public function unbind(Request $request)
     {
-        $this->assertOauthTable();
-        // 支持：binding_id（v2_user_oauth.id）或 oauth_user 行 id + provider
+        $this->assertBindingTable();
         $bindingId = (int)$request->input('binding_id', 0);
         $id = (int)$request->input('id');
         $force = (int)$request->input('force', 0) === 1;
@@ -251,9 +258,9 @@ class OauthController extends Controller
         if ($bindingId > 0) {
             $binding = UserOauth::find($bindingId);
         } elseif ($id > 0) {
-            // 兼容前端：先按绑定表 id 查，再按 oauth_user 主平台解绑
+            // 列表行 id 即为 v2_user_oauth.id；兼容旧前端传 oauth_user 行 id
             $binding = UserOauth::find($id);
-            if (!$binding) {
+            if (!$binding && Schema::hasTable('v2_oauth_user')) {
                 $oauthUser = OauthUser::find($id);
                 if ($oauthUser) {
                     $binding = UserOauth::where('user_id', $oauthUser->user_id)
@@ -267,19 +274,38 @@ class OauthController extends Controller
             abort(500, '绑定记录不存在');
         }
 
-        // 仅允许操作独立 OAuth 用户
-        if (!OauthUser::where('user_id', $binding->user_id)->exists()) {
-            abort(500, '该绑定不属于 OAuth 独立用户');
-        }
-
         $userId = (int)$binding->user_id;
         $provider = (string)$binding->provider;
+        $isOauthManaged = Schema::hasTable('v2_oauth_user')
+            && OauthUser::where('user_id', $userId)->exists();
 
         try {
             if ($force) {
                 $this->forceUnbind($userId, $provider, $binding);
             } else {
                 (new OauthService())->unbind($userId, $provider);
+            }
+
+            // OAuth 自动注册用户：主平台解绑后若无其它绑定，同步清理独立用户表（避免幽灵记录）
+            if ($isOauthManaged && Schema::hasTable('v2_oauth_user')) {
+                $remaining = UserOauth::where('user_id', $userId)->count();
+                if ($remaining === 0) {
+                    OauthUser::where('user_id', $userId)->delete();
+                } else {
+                    $oauthUser = OauthUser::where('user_id', $userId)->first();
+                    if ($oauthUser && $oauthUser->primary_provider === $provider) {
+                        $replacement = UserOauth::where('user_id', $userId)->orderBy('id', 'asc')->first();
+                        if ($replacement) {
+                            $oauthUser->primary_provider = $replacement->provider;
+                            $oauthUser->primary_provider_user_id = $replacement->provider_user_id;
+                            $oauthUser->primary_provider_username = $replacement->provider_username;
+                            $oauthUser->primary_provider_email = $replacement->provider_email;
+                            $oauthUser->primary_provider_avatar = $replacement->provider_avatar;
+                            $oauthUser->password_never_set = (int)$replacement->password_never_set;
+                            $oauthUser->save();
+                        }
+                    }
+                }
             }
         } catch (\Throwable $exception) {
             $message = $exception->getMessage() ?: '解绑失败';
@@ -293,7 +319,7 @@ class OauthController extends Controller
 
     public function resetSecret(Request $request)
     {
-        $user = $this->findOauthManagedSystemUser($request);
+        $user = $this->findBoundSystemUser($request);
         $user->token = Helper::guid();
         $user->uuid = Helper::guid(true);
         return response([
@@ -303,7 +329,7 @@ class OauthController extends Controller
 
     public function ban(Request $request)
     {
-        $query = $this->buildOauthUserQuery($request);
+        $query = $this->buildBindingUserQuery($request);
         $userIds = $query->pluck('user_id')->unique()->filter()->values();
         if ($userIds->isEmpty()) {
             return response(['data' => true]);
@@ -325,7 +351,15 @@ class OauthController extends Controller
 
     public function delUser(Request $request)
     {
-        $user = $this->findOauthManagedSystemUser($request);
+        $user = $this->findBoundSystemUser($request);
+        $isOauthManaged = Schema::hasTable('v2_oauth_user')
+            && OauthUser::where('user_id', $user->id)->exists();
+
+        // 邮箱用户仅解绑，不在此处删除账号（请到用户管理操作）
+        if (!$isOauthManaged) {
+            abort(500, '该账号为邮箱用户，仅可在此解绑第三方；删除账号请到「用户管理」');
+        }
+
         $this->deleteUserCascade($user);
         return response([
             'data' => true,
@@ -334,10 +368,21 @@ class OauthController extends Controller
 
     public function allDel(Request $request)
     {
-        $query = $this->buildOauthUserQuery($request);
+        $query = $this->buildBindingUserQuery($request);
         $userIds = $query->pluck('user_id')->unique()->filter()->values();
         if ($userIds->isEmpty()) {
             return response(['data' => true]);
+        }
+
+        // 批量删除仅针对 OAuth 独立用户
+        if (Schema::hasTable('v2_oauth_user')) {
+            $userIds = OauthUser::whereIn('user_id', $userIds)->pluck('user_id')->unique()->values();
+        } else {
+            $userIds = collect();
+        }
+
+        if ($userIds->isEmpty()) {
+            abort(500, '筛选结果中没有可删除的 OAuth 独立用户（邮箱用户绑定请单独解绑）');
         }
 
         DB::beginTransaction();
@@ -358,7 +403,7 @@ class OauthController extends Controller
 
     public function sendMail(UserSendMail $request)
     {
-        $query = $this->buildOauthUserQuery($request);
+        $query = $this->buildBindingUserQuery($request);
         $emails = $query->pluck('email')->unique()->filter()->values();
         foreach ($emails as $email) {
             SendEmailJob::dispatch([
@@ -380,41 +425,19 @@ class OauthController extends Controller
 
     public function dumpCSV(Request $request)
     {
-        $query = OauthUser::query()
-            ->from('v2_oauth_user as ou')
-            ->leftJoin('v2_user as u', 'u.id', '=', 'ou.user_id')
-            ->select([
-                'ou.primary_provider',
-                'ou.primary_provider_user_id',
-                'ou.primary_provider_username',
-                'ou.primary_provider_email',
-                'ou.password_never_set',
-                'ou.created_at',
-                'ou.email as oauth_email',
-                'u.id as user_id',
-                'u.email',
-                'u.banned',
-                'u.plan_id',
-                'u.transfer_enable',
-                'u.u',
-                'u.d',
-                'u.expired_at',
-                'u.balance',
-                'u.telegram_id',
-                'u.token',
-            ])
-            ->orderBy('ou.id', 'asc');
+        $this->assertBindingTable();
 
+        $query = $this->buildBindingListQuery()->orderBy('ub.id', 'asc');
         $this->applyFilters($request, $query);
         $rows = $query->get();
         $plans = Plan::get()->keyBy('id');
 
-        $data = "用户ID,邮箱,平台,平台名称,外部ID标签,外部ID,第三方用户名,第三方邮箱,TGID,是否未设密码,套餐,总流量GB,已用流量GB,到期时间,余额,是否封禁,订阅地址,绑定时间\r\n";
+        $data = "用户ID,邮箱,账号类型,平台,平台名称,外部ID标签,外部ID,第三方用户名,第三方邮箱,TGID,是否未设密码,套餐,总流量GB,已用流量GB,到期时间,余额,是否封禁,订阅地址,绑定时间\r\n";
         foreach ($rows as $row) {
-            $provider = $row->primary_provider;
+            $provider = $row->provider;
             $meta = OauthProviderRegistry::get($provider) ?: [];
             $providerName = $meta['name'] ?? $provider;
-            $idLabel = $this->externalIdLabel($provider);
+            $idLabel = $this->externalIdLabel((string)$provider);
             $planName = ($row->plan_id && isset($plans[$row->plan_id])) ? $plans[$row->plan_id]->name : '无订阅';
             $transfer = $row->transfer_enable ? round($row->transfer_enable / 1073741824, 2) : 0;
             $used = round(((int)$row->u + (int)$row->d) / 1073741824, 2);
@@ -425,16 +448,18 @@ class OauthController extends Controller
             $subscribe = $row->token ? Helper::getSubscribeUrl($row->token) : '';
             $created = $row->created_at ? date('Y-m-d H:i:s', is_numeric($row->created_at) ? $row->created_at : strtotime((string)$row->created_at)) : '';
             $email = $row->email ?: $row->oauth_email;
+            $accountType = $row->oauth_user_id ? 'OAuth注册' : '邮箱用户绑定';
             $data .= sprintf(
-                "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\r\n",
+                "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\r\n",
                 $row->user_id,
                 $this->csvCell($email),
+                $this->csvCell($accountType),
                 $this->csvCell($provider),
                 $this->csvCell($providerName),
                 $this->csvCell($idLabel),
-                $this->csvCell($row->primary_provider_user_id),
-                $this->csvCell($row->primary_provider_username),
-                $this->csvCell($row->primary_provider_email),
+                $this->csvCell($row->provider_user_id),
+                $this->csvCell($row->provider_username),
+                $this->csvCell($row->provider_email),
                 $this->csvCell($row->telegram_id),
                 $neverSet,
                 $this->csvCell($planName),
@@ -451,11 +476,69 @@ class OauthController extends Controller
         echo "\xEF\xBB\xBF" . $data;
     }
 
-    private function assertOauthTable(): void
+    private function assertBindingTable(): void
     {
-        if (!Schema::hasTable('v2_oauth_user')) {
-            abort(500, 'OAuth 用户表不存在，请先执行 php artisan migrate');
+        OauthService::ensureTableExists();
+        if (!Schema::hasTable('v2_user_oauth')) {
+            abort(500, 'OAuth 绑定表不存在，请先执行 php artisan migrate');
         }
+    }
+
+    private function buildBindingListQuery()
+    {
+        $this->assertBindingTable();
+
+        $query = UserOauth::query()
+            ->from('v2_user_oauth as ub')
+            ->leftJoin('v2_user as u', 'u.id', '=', 'ub.user_id')
+            ->select([
+                'ub.id',
+                'ub.user_id',
+                'ub.provider',
+                'ub.provider_user_id',
+                'ub.provider_username',
+                'ub.provider_email',
+                'ub.provider_avatar',
+                'ub.password_never_set',
+                'ub.created_at',
+                'ub.updated_at',
+                'u.email',
+                'u.banned',
+                'u.plan_id',
+                'u.transfer_enable',
+                'u.u',
+                'u.d',
+                'u.device_limit',
+                'u.expired_at',
+                'u.balance',
+                'u.commission_balance',
+                'u.telegram_id',
+                'u.token',
+                'u.uuid',
+                'u.remarks',
+                'u.is_admin',
+                'u.is_staff',
+                'u.invite_user_id',
+                'u.created_at as user_created_at',
+                'u.last_login_at',
+            ]);
+
+        if (Schema::hasTable('v2_oauth_user')) {
+            $query->leftJoin('v2_oauth_user as ou', 'ou.user_id', '=', 'ub.user_id')
+                ->addSelect([
+                    'ou.id as oauth_user_id',
+                    'ou.email as oauth_email',
+                    'ou.primary_provider',
+                    'ou.remarks as oauth_remarks',
+                ]);
+        } else {
+            $query->selectRaw('NULL as oauth_user_id')
+                ->selectRaw('NULL as oauth_email')
+                ->selectRaw('NULL as primary_provider')
+                ->selectRaw('NULL as oauth_remarks');
+        }
+
+        return $query;
     }
 
     private function applyFilters(Request $request, $query): void
@@ -463,17 +546,19 @@ class OauthController extends Controller
         $filters = $request->input('filter');
         if (!$filters || !is_array($filters)) {
             if ($request->filled('provider')) {
-                $query->where('ou.primary_provider', (string)$request->input('provider'));
+                $query->where('ub.provider', (string)$request->input('provider'));
             }
             if ($request->filled('email')) {
-                $query->where(function ($builder) use ($request) {
-                    $keyword = '%' . $request->input('email') . '%';
-                    $builder->where('ou.email', 'like', $keyword)
-                        ->orWhere('u.email', 'like', $keyword);
+                $keyword = '%' . $request->input('email') . '%';
+                $query->where(function ($builder) use ($keyword) {
+                    $builder->where('u.email', 'like', $keyword);
+                    if (Schema::hasTable('v2_oauth_user')) {
+                        $builder->orWhere('ou.email', 'like', $keyword);
+                    }
                 });
             }
             if ($request->filled('provider_user_id')) {
-                $query->where('ou.primary_provider_user_id', 'like', '%' . $request->input('provider_user_id') . '%');
+                $query->where('ub.provider_user_id', 'like', '%' . $request->input('provider_user_id') . '%');
             }
             if ($request->filled('banned') && $request->input('banned') !== '') {
                 $query->where('u.banned', (int)$request->input('banned'));
@@ -496,8 +581,10 @@ class OauthController extends Controller
             switch ($key) {
                 case 'email':
                     $query->where(function ($builder) use ($condition, $value) {
-                        $builder->where('ou.email', $condition, $value)
-                            ->orWhere('u.email', $condition, $value);
+                        $builder->where('u.email', $condition, $value);
+                        if (Schema::hasTable('v2_oauth_user')) {
+                            $builder->orWhere('ou.email', $condition, $value);
+                        }
                     });
                     break;
                 case 'banned':
@@ -511,32 +598,44 @@ class OauthController extends Controller
                     }
                     break;
                 case 'provider':
-                    $query->where('ou.primary_provider', $condition, $value);
+                    $query->where('ub.provider', $condition, $value);
                     break;
                 case 'provider_user_id':
                 case 'external_id':
-                    $query->where('ou.primary_provider_user_id', $condition, $value);
+                    $query->where('ub.provider_user_id', $condition, $value);
                     break;
                 case 'provider_username':
-                    $query->where('ou.primary_provider_username', $condition, $value);
+                    $query->where('ub.provider_username', $condition, $value);
                     break;
                 case 'provider_email':
-                    $query->where('ou.primary_provider_email', $condition, $value);
+                    $query->where('ub.provider_email', $condition, $value);
                     break;
                 case 'user_id':
-                    $query->where('ou.user_id', $condition, $value);
+                    $query->where('ub.user_id', $condition, $value);
                     break;
                 case 'telegram_id':
                     $query->where('u.telegram_id', $condition, $value);
                     break;
                 case 'remarks':
                     $query->where(function ($builder) use ($condition, $value) {
-                        $builder->where('ou.remarks', $condition, $value)
-                            ->orWhere('u.remarks', $condition, $value);
+                        $builder->where('u.remarks', $condition, $value);
+                        if (Schema::hasTable('v2_oauth_user')) {
+                            $builder->orWhere('ou.remarks', $condition, $value);
+                        }
                     });
                     break;
                 case 'password_never_set':
-                    $query->where('ou.password_never_set', $condition, $value);
+                    $query->where('ub.password_never_set', $condition, $value);
+                    break;
+                case 'is_oauth_managed':
+                    if (!Schema::hasTable('v2_oauth_user')) {
+                        break;
+                    }
+                    if ((int)$value === 1 || $value === true || $value === '1') {
+                        $query->whereNotNull('ou.id');
+                    } else {
+                        $query->whereNull('ou.id');
+                    }
                     break;
                 default:
                     break;
@@ -544,38 +643,60 @@ class OauthController extends Controller
         }
     }
 
-    private function buildOauthUserQuery(Request $request)
+    private function buildBindingUserQuery(Request $request)
     {
-        $this->assertOauthTable();
-        $query = OauthUser::query()
-            ->from('v2_oauth_user as ou')
-            ->leftJoin('v2_user as u', 'u.id', '=', 'ou.user_id')
-            ->select([
-                'ou.user_id as user_id',
-                'ou.email as email',
-            ]);
+        $this->assertBindingTable();
+        $query = UserOauth::query()
+            ->from('v2_user_oauth as ub')
+            ->leftJoin('v2_user as u', 'u.id', '=', 'ub.user_id');
+        if (Schema::hasTable('v2_oauth_user')) {
+            $query->leftJoin('v2_oauth_user as ou', 'ou.user_id', '=', 'ub.user_id');
+        }
+        $query->select([
+            'ub.user_id',
+            'u.email',
+        ]);
         $this->applyFilters($request, $query);
         return $query;
     }
 
-    private function findOauthManagedSystemUser(Request $request): User
+    /**
+     * 根据 user_id / 绑定 id / 旧 oauth_user id 解析已绑定第三方的系统用户。
+     */
+    private function findBoundSystemUser(Request $request): User
     {
         $userId = (int)$request->input('user_id', 0);
         if ($userId <= 0 && $request->input('id')) {
-            $oauthUser = OauthUser::find((int)$request->input('id'));
-            if ($oauthUser) {
-                $userId = (int)$oauthUser->user_id;
+            $id = (int)$request->input('id');
+            $binding = UserOauth::find($id);
+            if ($binding) {
+                $userId = (int)$binding->user_id;
+            } elseif (Schema::hasTable('v2_oauth_user')) {
+                $oauthUser = OauthUser::find($id);
+                if ($oauthUser) {
+                    $userId = (int)$oauthUser->user_id;
+                } else {
+                    $userId = $id;
+                }
             } else {
-                $userId = (int)$request->input('id');
+                $userId = $id;
             }
         }
+
         $user = User::find($userId);
         if (!$user) {
             abort(500, '用户不存在');
         }
-        if (!OauthUser::where('user_id', $user->id)->exists()) {
-            abort(500, '该用户不是 OAuth 独立用户');
+
+        $hasBinding = Schema::hasTable('v2_user_oauth')
+            && UserOauth::where('user_id', $user->id)->exists();
+        $isOauthManaged = Schema::hasTable('v2_oauth_user')
+            && OauthUser::where('user_id', $user->id)->exists();
+
+        if (!$hasBinding && !$isOauthManaged) {
+            abort(500, '该用户没有第三方绑定');
         }
+
         return $user;
     }
 
@@ -625,9 +746,9 @@ class OauthController extends Controller
         });
     }
 
-    private function formatOauthUserRow($row, $plans): array
+    private function formatBindingListRow($row, $plans): array
     {
-        $provider = $row->primary_provider;
+        $provider = (string)$row->provider;
         $meta = OauthProviderRegistry::get($provider) ?: [];
         $providerName = $meta['name'] ?? $provider;
         $planName = null;
@@ -651,28 +772,23 @@ class OauthController extends Controller
         }
 
         $email = $row->email ?: $row->oauth_email;
-
-        // 绑定表 id：用于解绑主平台（若存在）
-        $primaryBindingId = null;
-        if (Schema::hasTable('v2_user_oauth')) {
-            $primaryBindingId = UserOauth::where('user_id', $row->user_id)
-                ->where('provider', $provider)
-                ->value('id');
-        }
+        $isOauthManaged = !empty($row->oauth_user_id);
 
         return [
+            // 列表行 id = v2_user_oauth.id，便于直接解绑
             'id' => $row->id,
-            'binding_id' => $primaryBindingId,
+            'binding_id' => $row->id,
+            'oauth_user_id' => $row->oauth_user_id,
             'user_id' => $row->user_id,
             'email' => $email,
             'provider' => $provider,
             'provider_name' => $providerName,
-            'provider_user_id' => $row->primary_provider_user_id,
+            'provider_user_id' => $row->provider_user_id,
             'external_id_label' => $this->externalIdLabel($provider),
-            'external_id' => $row->primary_provider_user_id,
-            'provider_username' => $row->primary_provider_username,
-            'provider_email' => $row->primary_provider_email,
-            'provider_avatar' => $row->primary_provider_avatar,
+            'external_id' => $row->provider_user_id,
+            'provider_username' => $row->provider_username,
+            'provider_email' => $row->provider_email,
+            'provider_avatar' => $row->provider_avatar,
             'password_never_set' => (int)$row->password_never_set,
             'telegram_id' => $row->telegram_id,
             'banned' => (int)$row->banned,
@@ -700,6 +816,10 @@ class OauthController extends Controller
             'user_created_at' => $row->user_created_at,
             'last_login_at' => $row->last_login_at,
             'is_placeholder_email' => (bool)preg_match('/@oauth\.local$/i', (string)$email),
+            // true = OAuth 自动注册（用户管理不可见）；false = 邮箱用户后绑定
+            'is_oauth_managed' => $isOauthManaged,
+            'account_type' => $isOauthManaged ? 'oauth_registered' : 'email_bound',
+            'account_type_label' => $isOauthManaged ? 'OAuth注册' : '邮箱用户绑定',
         ];
     }
 

@@ -14,11 +14,14 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Models\UserOauth;
 use App\Services\AuthService;
+use App\Services\Oauth\OauthProviderRegistry;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class UserController extends Controller
 {
@@ -123,9 +126,53 @@ class UserController extends Controller
             abort(500, '参数错误');
         }
         $user = User::find($request->input('id'));
+        if (!$user) {
+            abort(500, '用户不存在');
+        }
         if ($user->invite_user_id) {
             $user['invite_user'] = User::find($user->invite_user_id);
         }
+
+        $oauthBindings = [];
+        if (Schema::hasTable('v2_user_oauth')) {
+            $oauthBindings = UserOauth::where('user_id', $user->id)->get()->map(function ($binding) {
+                $meta = OauthProviderRegistry::get($binding->provider) ?: [];
+                $externalIdLabel = '平台用户ID';
+                switch ($binding->provider) {
+                    case 'linuxdo':
+                        $externalIdLabel = '论坛ID';
+                        break;
+                    case 'telegram':
+                        $externalIdLabel = 'TGID';
+                        break;
+                    case 'github':
+                        $externalIdLabel = 'GitHub ID';
+                        break;
+                    case 'google':
+                        $externalIdLabel = 'Google ID';
+                        break;
+                    case 'microsoft':
+                        $externalIdLabel = 'Microsoft ID';
+                        break;
+                }
+                return [
+                    'id' => $binding->id,
+                    'provider' => $binding->provider,
+                    'provider_name' => $meta['name'] ?? $binding->provider,
+                    'provider_user_id' => $binding->provider_user_id,
+                    'external_id_label' => $externalIdLabel,
+                    'external_id' => $binding->provider_user_id,
+                    'provider_username' => $binding->provider_username,
+                    'provider_email' => $binding->provider_email,
+                    'provider_avatar' => $binding->provider_avatar,
+                    'password_never_set' => (int)$binding->password_never_set,
+                    'created_at' => $binding->created_at,
+                ];
+            })->values()->all();
+        }
+        $user['oauth_bindings'] = $oauthBindings;
+        $user['has_oauth_binding'] = count($oauthBindings) > 0;
+
         return response([
             'data' => $user
         ]);

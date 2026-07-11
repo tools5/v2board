@@ -1,0 +1,303 @@
+.v2b-login-settings {
+    max-width: 1120px;
+    margin: 0 auto;
+}
+
+.v2b-provider-panel {
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #dfe3e8;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(31, 45, 61, .04);
+}
+
+.v2b-provider-panel.is-open {
+    border-color: #cbd5e1;
+}
+
+.v2b-provider-header {
+    display: flex;
+    min-height: 72px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 12px 20px;
+    background: #fff;
+}
+
+.v2b-provider-panel.is-open .v2b-provider-header {
+    border-bottom: 1px solid #e7eaee;
+}
+
+.v2b-provider-disclosure {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 14px;
+    padding: 4px 0;
+    color: #263238;
+    text-align: left;
+    background: transparent;
+    border: 0;
+}
+
+.v2b-provider-disclosure:hover,
+.v2b-provider-disclosure:focus {
+    color: #0665d0;
+    outline: 0;
+}
+
+.v2b-provider-disclosure:focus-visible {
+    box-shadow: 0 0 0 3px rgba(6, 101, 208, .18);
+}
+
+.v2b-provider-disclosure > .fa {
+    width: 14px;
+    flex: 0 0 14px;
+    color: #718096;
+    font-size: 16px;
+    text-align: center;
+}
+
+.v2b-provider-heading {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.v2b-provider-name {
+    overflow-wrap: anywhere;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.v2b-provider-description {
+    overflow-wrap: anywhere;
+    color: #687386;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.v2b-provider-controls {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 14px;
+}
+
+.v2b-provider-controls .badge {
+    min-width: 54px;
+    padding: 5px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.v2b-provider-body {
+    padding: 0 20px;
+    background: #fff;
+}
+
+.v2b-login-field {
+    min-height: 78px;
+    margin-right: 0;
+    margin-left: 0;
+    padding: 16px 0;
+    border-bottom: 1px solid #edf0f3;
+}
+
+.v2b-login-field:last-child {
+    border-bottom: 0;
+}
+
+.v2b-login-field-label {
+    display: block;
+    margin-bottom: 5px;
+    color: #273444;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.v2b-login-field-help {
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.v2b-login-field-control {
+    min-width: 0;
+    text-align: right;
+}
+
+.v2b-login-field-control .form-control {
+    width: 100%;
+    min-height: 38px;
+    font-size: 14px;
+}
+
+.v2b-secret-control,
+.v2b-callback-control {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+}
+
+.v2b-secret-control .form-control,
+.v2b-callback-control .form-control {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.v2b-secret-control .btn,
+.v2b-callback-control .btn {
+    min-height: 34px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.v2b-doc-link {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    overflow-wrap: anywhere;
+    text-align: left;
+}
+
+.v2b-provider-disabled,
+.v2b-login-empty {
+    padding: 28px 16px;
+    color: #6b7280;
+    font-size: 13px;
+    text-align: center;
+}
+
+.v2b-login-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 22px;
+    color: #7f1d1d;
+    background: #fff7f7;
+    border: 1px solid #f3c4c4;
+    border-radius: 4px;
+}
+
+.v2b-login-error > .fa {
+    margin-top: 2px;
+    font-size: 18px;
+}
+
+.v2b-login-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 16px;
+    padding: 16px 0 4px;
+}
+
+.v2b-save-state {
+    color: #718096;
+    font-size: 12px;
+}
+
+.v2b-save-state.is-dirty {
+    color: #9a6700;
+}
+
+.v2b-login-actions .btn {
+    min-width: 150px;
+    min-height: 38px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+@media (max-width: 767.98px) {
+    .v2b-provider-header {
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px 16px;
+    }
+
+    .v2b-provider-disclosure {
+        gap: 10px;
+    }
+
+    .v2b-provider-controls {
+        flex-direction: column-reverse;
+        align-items: flex-end;
+        gap: 8px;
+    }
+
+    .v2b-provider-controls .badge {
+        min-width: 48px;
+    }
+
+    .v2b-provider-body {
+        padding: 0 16px;
+    }
+
+    .v2b-login-field {
+        min-height: 0;
+        padding: 15px 0;
+    }
+
+    .v2b-login-field-control {
+        margin-top: 12px;
+        text-align: left;
+    }
+
+    .v2b-secret-control,
+    .v2b-callback-control {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .v2b-secret-control .btn,
+    .v2b-callback-control .btn {
+        width: 100%;
+        margin-left: 0 !important;
+    }
+
+    .v2b-login-actions {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .v2b-save-state {
+        text-align: center;
+    }
+
+    .v2b-login-actions .btn {
+        width: 100%;
+    }
+}
+
+/* OAuth 管理 */
+.v2b-oauth-manage .v2b-oauth-table td { vertical-align: top; }
+.v2b-oauth-modal-mask {
+  position: fixed; inset: 0; z-index: 10050;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.v2b-oauth-modal {
+  width: min(720px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+}
+.v2b-oauth-modal-header,
+.v2b-oauth-modal-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
+}
+.v2b-oauth-modal-footer { border-bottom: 0; border-top: 1px solid #e5e7eb; justify-content: flex-end; }
+.v2b-oauth-modal-body { padding: 18px; }
+.v2b-oauth-modal-header h4 { margin: 0; font-size: 16px; }

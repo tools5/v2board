@@ -10,24 +10,13 @@ use App\Models\User;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
-use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Mail;
-use ReCaptcha\ReCaptcha;
 use Illuminate\Support\Facades\RateLimiter;
-
-use function PHPUnit\Framework\isEmpty;
+use ReCaptcha\ReCaptcha;
 
 class CommController extends Controller
 {
-    private function isEmailVerify()
-    {
-        return response([
-            'data' => (int)config('v2board.email_verify', 0) ? 1 : 0
-        ]);
-    }
-
     public function sendEmailVerify(CommSendEmailVerify $request)
     {
         $ip = $request->ip();
@@ -66,9 +55,22 @@ class CommController extends Controller
         if (isset($isforget)) {
             if ($isforget == 0 && $email_exists) {
                 abort(500, __('This email is registered'));
-            } 
+            }
             if ($isforget == 1 && !$email_exists) {
                 abort(500, __('This email is not registered in the system'));
+            }
+            // 注册走邮件链接时，禁止再发验证码
+            if ((int)$isforget === 0
+                && (int)config('v2board.email_verify', 0) === 1
+                && config('v2board.register_email_mode', 'code') === 'link'
+            ) {
+                abort(500, '当前注册需通过邮箱完成，请使用页面上的「发送注册邮件」');
+            }
+            // 找回密码走邮件链接时，禁止再发验证码
+            if ((int)$isforget === 1
+                && config('v2board.register_email_mode', 'code') === 'link'
+            ) {
+                abort(500, '当前找回密码需通过邮箱完成，请使用页面上的「发送重置邮件」');
             }
         }
         if (Cache::get(CacheKey::get('LAST_SEND_EMAIL_VERIFY_TIMESTAMP', $cacheKeyEmail))) {
@@ -106,14 +108,5 @@ class CommController extends Controller
         return response([
             'data' => true
         ]);
-    }
-
-    private function getEmailSuffix()
-    {
-        $suffix = config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT);
-        if (!is_array($suffix)) {
-            return preg_split('/,/', $suffix);
-        }
-        return $suffix;
     }
 }

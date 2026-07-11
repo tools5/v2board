@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ConfigSave;
 use App\Jobs\SendEmailJob;
+use App\Services\Oauth\OauthProviderRegistry;
 use App\Services\TelegramService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
@@ -140,7 +141,9 @@ class ConfigController extends Controller
                 'email_username' => config('v2board.email_username'),
                 'email_password' => config('v2board.email_password'),
                 'email_encryption' => config('v2board.email_encryption'),
-                'email_from_address' => config('v2board.email_from_address')
+                'email_from_address' => config('v2board.email_from_address'),
+                // 与安全页「邮箱验证」配合：开启验证后，注册使用验证码或邮件链接
+                'register_email_mode' => config('v2board.register_email_mode', 'code') === 'link' ? 'link' : 'code',
             ],
             'telegram' => [
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
@@ -171,6 +174,10 @@ class ConfigController extends Controller
                 'password_limit_enable' => (int)config('v2board.password_limit_enable', 1),
                 'password_limit_count' => config('v2board.password_limit_count', 5),
                 'password_limit_expire' => config('v2board.password_limit_expire', 60)
+            ],
+            // 登录设置：统一管理第三方登录（可继续扩展 GitHub / Google 等）
+            'login' => [
+                'providers' => OauthProviderRegistry::adminProviderList(),
             ]
         ];
         if ($key && isset($data[$key])) {
@@ -190,17 +197,13 @@ class ConfigController extends Controller
     {
         $data = $request->validated();
         $config = config('v2board');
-        foreach (ConfigSave::RULES as $k => $v) {
-            if (!in_array($k, array_keys(ConfigSave::RULES))) {
-                unset($config[$k]);
-                continue;
-            }
+        foreach (ConfigSave::allRules() as $k => $v) {
             if (array_key_exists($k, $data)) {
                 $config[$k] = $data[$k];
             }
         }
         $data = var_export($config, 1);
-        if (!File::put(base_path() . '/config/v2board.php', "<?php\n return $data ;")) {
+        if (!File::put(base_path() . '/config/v2board.php', "<?php\n return $data ;", true)) {
             abort(500, '修改失败');
         }
         if (function_exists('opcache_reset')) {

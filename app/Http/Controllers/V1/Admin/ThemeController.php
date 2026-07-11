@@ -15,10 +15,11 @@ class ThemeController extends Controller
 
     public function __construct()
     {
-        $this->path = $path = public_path('theme/');
-        $this->themes = array_map(function ($item) use ($path) {
-            return str_replace($path, '', $item);
-        }, glob($path . '*'));
+        $this->path = public_path('theme') . DIRECTORY_SEPARATOR;
+        $themeDirectories = glob($this->path . '*', GLOB_ONLYDIR) ?: [];
+        $this->themes = array_values(array_filter(array_map(function ($item) {
+            return basename($item);
+        }, $themeDirectories)));
     }
 
     public function getThemes()

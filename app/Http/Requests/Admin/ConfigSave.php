@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Services\Oauth\OauthProviderRegistry;
 use Illuminate\Foundation\Http\FormRequest;
 
 class ConfigSave extends FormRequest
@@ -75,6 +76,8 @@ class ConfigSave extends FormRequest
         'email_password' => '',
         'email_encryption' => '',
         'email_from_address' => '',
+        // 开启邮箱验证时的注册方式：code=验证码，link=邮件链接
+        'register_email_mode' => 'in:code,link',
         // telegram
         'telegram_bot_enable' => 'in:0,1',
         'telegram_bot_token' => '',
@@ -105,6 +108,12 @@ class ConfigSave extends FormRequest
         'password_limit_count' => 'integer',
         'password_limit_expire' => 'integer',
     ];
+
+    public static function allRules(): array
+    {
+        return array_merge(self::RULES, OauthProviderRegistry::configRules());
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *
@@ -112,7 +121,7 @@ class ConfigSave extends FormRequest
      */
     public function rules()
     {
-        $rules = self::RULES;
+        $rules = self::allRules();
 
         $rules['deposit_bounus'][] = function ($attribute, $value, $fail) {
             foreach ($value as $tier) {
@@ -125,6 +134,61 @@ class ConfigSave extends FormRequest
             }
         };
         return $rules;
+    }
+
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            $input = $this->all();
+
+            foreach (OauthProviderRegistry::all() as $provider => $meta) {
+                $providerKeys = array_filter([
+                    $meta['enable_key'] ?? null,
+                    $meta['client_id_key'] ?? null,
+                    $meta['client_secret_key'] ?? null,
+                    $meta['bot_token_key'] ?? null,
+                    $meta['bot_username_key'] ?? null,
+                    $meta['auto_register_key'] ?? null,
+                    $meta['min_trust_level_key'] ?? null,
+                    $meta['callback_url_key'] ?? null,
+                ]);
+                $wasTouched = false;
+                foreach ($providerKeys as $providerKey) {
+                    if (array_key_exists($providerKey, $input)) {
+                        $wasTouched = true;
+                        break;
+                    }
+                }
+                if (!$wasTouched) {
+                    continue;
+                }
+
+                $enableKey = $meta['enable_key'];
+                $enabled = array_key_exists($enableKey, $input)
+                    ? (int)$input[$enableKey]
+                    : (int)config('v2board.' . $enableKey, 0);
+                if ($enabled !== 1) {
+                    continue;
+                }
+
+                foreach (OauthProviderRegistry::missingCredentialKeys($provider, $input) as $missingKey) {
+                    $label = '配置项';
+                    if (!empty($meta['client_id_key']) && $missingKey === $meta['client_id_key']) {
+                        $label = 'Client ID';
+                    } elseif (!empty($meta['client_secret_key']) && $missingKey === $meta['client_secret_key']) {
+                        $label = 'Client Secret';
+                    } elseif (!empty($meta['bot_username_key']) && $missingKey === $meta['bot_username_key']) {
+                        $label = 'Bot Username';
+                    } elseif (!empty($meta['bot_token_key']) && $missingKey === $meta['bot_token_key']) {
+                        $label = 'Bot Token（可留空以复用系统 Telegram Bot Token）';
+                    }
+                    $validator->errors()->add(
+                        $missingKey,
+                        '启用 ' . $meta['name'] . ' 前请填写 ' . $label
+                    );
+                }
+            }
+        });
     }
 
     public function messages()

@@ -35,6 +35,15 @@ class UserController extends Controller
 
     private function filter(Request $request, $builder)
     {
+        // OAuth 独立用户不出现在用户管理
+        if (\Illuminate\Support\Facades\Schema::hasTable('v2_oauth_user')) {
+            $builder->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('v2_oauth_user')
+                    ->whereColumn('v2_oauth_user.user_id', 'v2_user.id');
+            });
+        }
+
         $filters = $request->input('filter');
         if ($filters) {
             foreach ($filters as $k => $filter) {
@@ -345,6 +354,12 @@ class UserController extends Controller
                 }
                 Ticket::where('user_id', $user->id)->delete();
                 User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
+                if (\Illuminate\Support\Facades\Schema::hasTable('v2_user_oauth')) {
+                \App\Models\UserOauth::where('user_id', $user->id)->delete();
+            }
+            if (\Illuminate\Support\Facades\Schema::hasTable('v2_oauth_user')) {
+                \App\Models\OauthUser::where('user_id', $user->id)->delete();
+            }
             });
             $builder->delete();
             DB::commit();
@@ -364,6 +379,10 @@ class UserController extends Controller
         if (!$user) {
             abort(500, '用户不存在');
         }
+        if (\Illuminate\Support\Facades\Schema::hasTable('v2_oauth_user')
+            && \App\Models\OauthUser::where('user_id', $user->id)->exists()) {
+            abort(500, '该用户属于 OAuth 用户，请到「OAuth 管理」中操作');
+        }
         DB::beginTransaction();
         try {
             $authService = new AuthService($user);
@@ -377,6 +396,12 @@ class UserController extends Controller
                 TicketMessage::where('ticket_id', $ticket->id)->delete();
             }
             Ticket::where('user_id', $request->input('id'))->delete();
+            if (\Illuminate\Support\Facades\Schema::hasTable('v2_user_oauth')) {
+                \App\Models\UserOauth::where('user_id', $request->input('id'))->delete();
+            }
+            if (\Illuminate\Support\Facades\Schema::hasTable('v2_oauth_user')) {
+                \App\Models\OauthUser::where('user_id', $request->input('id'))->delete();
+            }
     
             $user->delete();
             DB::commit();

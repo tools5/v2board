@@ -13,11 +13,19 @@ class UserRoute
         ], function ($router) {
             // User
             $router->get ('/unbindTelegram', 'V1\\User\\UserController@unbindTelegram');
+            // 第三方登录绑定
+            $router->get ('/oauth/providers', 'V1\\User\\OauthController@providers');
+            $router->get ('/oauth/bindings', 'V1\\User\\OauthController@bindings');
+            $router->post('/oauth/bind', 'V1\\User\\OauthController@bind');
+            $router->post('/oauth/telegram', 'V1\\User\\OauthController@telegramBind');
+            $router->post('/oauth/unbind', 'V1\\User\\OauthController@unbind');
             $router->get ('/resetSecurity', 'V1\\User\\UserController@resetSecurity');
             $router->get ('/info', 'V1\\User\\UserController@info');
             $router->post('/newPeriod', 'V1\\User\\UserController@newPeriod');
             $router->post('/redeemgiftcard', 'V1\\User\\UserController@redeemgiftcard');
             $router->post('/changePassword', 'V1\\User\\UserController@changePassword');
+            // OAuth 首次注册「完善信息」：设置真实邮箱 / 密码（可跳过）
+            $router->post('/setupOauthInfo', 'V1\\User\\UserController@setupOauthInfo');
             $router->post('/update', 'V1\\User\\UserController@update');
             $router->get ('/getSubscribe', 'V1\\User\\UserController@getSubscribe');
             $router->get ('/getStat', 'V1\\User\\UserController@getStat');

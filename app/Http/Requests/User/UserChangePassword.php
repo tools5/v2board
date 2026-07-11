@@ -14,7 +14,9 @@ class UserChangePassword extends FormRequest
     public function rules()
     {
         return [
-            'old_password' => 'required',
+            // 旧密码是否必填由控制器按用户类型决定：
+            // 从未设过密码的 OAuth 用户走「设置密码」流程，无需旧密码。
+            'old_password' => 'nullable',
             'new_password' => 'required|min:8'
         ];
     }

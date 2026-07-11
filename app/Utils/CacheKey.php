@@ -7,6 +7,10 @@ class CacheKey
     CONST KEYS = [
         'EMAIL_VERIFY_CODE' => '邮箱验证码',
         'LAST_SEND_EMAIL_VERIFY_TIMESTAMP' => '最后一次发送邮箱验证码时间',
+        'REGISTER_LINK_TOKEN' => '注册邮件链接令牌',
+        'LAST_SEND_REGISTER_LINK_TIMESTAMP' => '最后一次发送注册邮件链接时间',
+        'PASSWORD_RESET_LINK_TOKEN' => '找回密码邮件链接令牌',
+        'LAST_SEND_PASSWORD_RESET_LINK_TIMESTAMP' => '最后一次发送找回密码邮件链接时间',
         'SERVER_VMESS_ONLINE_USER' => '节点在线用户',
         'SERVER_VMESS_LAST_CHECK_AT' => '节点最后检查时间',
         'SERVER_VMESS_LAST_PUSH_AT' => '节点最后推送时间',
@@ -38,7 +42,8 @@ class CacheKey
         'LAST_SEND_LOGIN_WITH_MAIL_LINK_TIMESTAMP' => '最后一次发送登入链接时间',
         'PASSWORD_ERROR_LIMIT' => '密码错误次数限制',
         'USER_SESSIONS' => '用户session',
-        'FORGET_REQUEST_LIMIT' => '找回密码次数限制'
+        'FORGET_REQUEST_LIMIT' => '找回密码次数限制',
+        'OAUTH_STATE' => '第三方登录状态'
     ];
 
     public static function get(string $key, $uniqueValue)

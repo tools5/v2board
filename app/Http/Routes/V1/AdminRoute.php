@@ -116,6 +116,17 @@ class AdminRoute
             $router->post('/user/delUser', 'V1\\Admin\\UserController@delUser');
             $router->post('/user/allDel', 'V1\\Admin\\UserController@allDel');
             $router->post('/user/setInviteUser', 'V1\\Admin\\UserController@setInviteUser');
+            // OAuth 用户管理（与用户管理能力对齐，按绑定展示第三方 ID）
+            $router->get ('/oauth/fetch', 'V1\\Admin\\OauthController@fetch');
+            $router->get ('/oauth/getInfoById', 'V1\\Admin\\OauthController@getInfoById');
+            $router->post('/oauth/update', 'V1\\Admin\\OauthController@update');
+            $router->post('/oauth/unbind', 'V1\\Admin\\OauthController@unbind');
+            $router->post('/oauth/resetSecret', 'V1\\Admin\\OauthController@resetSecret');
+            $router->post('/oauth/ban', 'V1\\Admin\\OauthController@ban');
+            $router->post('/oauth/delUser', 'V1\\Admin\\OauthController@delUser');
+            $router->post('/oauth/allDel', 'V1\\Admin\\OauthController@allDel');
+            $router->post('/oauth/sendMail', 'V1\\Admin\\OauthController@sendMail');
+            $router->post('/oauth/dumpCSV', 'V1\\Admin\\OauthController@dumpCSV');
             // Stat
             $router->get ('/stat/getStat', 'V1\\Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'V1\\Admin\\StatController@getOverride');

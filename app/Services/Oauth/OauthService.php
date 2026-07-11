@@ -661,15 +661,17 @@ class OauthService
             }
         }
 
-        // 邮箱已存在则自动绑定已有账号：仅在第三方邮箱可信（已验证）时才允许，
-        // 否则攻击者可用未验证/伪造邮箱直接接管站内已有账号。
-        if (!empty($normalized['provider_email']) && $this->isProviderEmailTrusted($meta, $normalized)) {
-            $existUser = User::where('email', $normalized['provider_email'])->first();
+        // 同一真实邮箱只对应一个本站账号：可信第三方邮箱命中后直接绑定，禁止再新建用户。
+        // 匹配顺序：本站邮箱 → 其他平台绑定上的 provider_email。
+        $trustedEmail = $this->resolveTrustedProviderEmail($meta, $normalized);
+        if ($trustedEmail !== null) {
+            $existUser = $this->findUserByTrustedEmail($trustedEmail);
             if ($existUser) {
                 if ($existUser->banned) {
                     abort(403, '您的账号已被停用');
                 }
                 $this->bindUser($existUser, $provider, $normalized, $tokenData, $profile);
+                $this->maybeUpgradePlaceholderEmail($existUser, $trustedEmail);
                 $existUser->last_login_at = time();
                 $existUser->save();
                 return $existUser;
@@ -701,6 +703,69 @@ class OauthService
         return $this->createUserFromOauth($provider, $meta, $normalized, $tokenData, $profile, $inviteCode);
     }
 
+    /**
+     * 提取可用于「自动关联已有账号」的规范化邮箱；不可信时返回 null。
+     */
+    private function resolveTrustedProviderEmail(array $meta, array $normalized): ?string
+    {
+        if (empty($normalized['provider_email']) || !$this->isProviderEmailTrusted($meta, $normalized)) {
+            return null;
+        }
+
+        $candidateEmail = strtolower(trim((string)$normalized['provider_email']));
+        if ($candidateEmail === '' || !filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+        // 占位域不可作为关联依据
+        if (preg_match('/@oauth\.local$/i', $candidateEmail)) {
+            return null;
+        }
+
+        return $candidateEmail;
+    }
+
+    /**
+     * 按可信邮箱查找本站用户：先匹配 v2_user.email，再匹配任意平台绑定的 provider_email。
+     * 这样 GitHub / LinuxDo 等不同平台只要邮箱一致，都会落到同一账号。
+     */
+    private function findUserByTrustedEmail(string $trustedEmail): ?User
+    {
+        $existUser = User::whereRaw('LOWER(email) = ?', [$trustedEmail])->first();
+        if ($existUser) {
+            return $existUser;
+        }
+
+        $bindingWithEmail = UserOauth::whereRaw('LOWER(provider_email) = ?', [$trustedEmail])
+            ->orderBy('id', 'asc')
+            ->first();
+        if (!$bindingWithEmail) {
+            return null;
+        }
+
+        $user = User::find($bindingWithEmail->user_id);
+        return $user ?: null;
+    }
+
+    /**
+     * OAuth 自动注册用户仍是 @oauth.local 占位邮箱时，若后续用可信邮箱登录/绑定，
+     * 自动升级为本站真实邮箱，便于后续各平台继续按邮箱合并。
+     */
+    private function maybeUpgradePlaceholderEmail(User $user, string $trustedEmail): void
+    {
+        if (!preg_match('/@oauth\.local$/i', (string)$user->email)) {
+            return;
+        }
+        if (strlen($trustedEmail) > 64) {
+            return;
+        }
+        if (User::whereRaw('LOWER(email) = ?', [$trustedEmail])->where('id', '!=', $user->id)->exists()) {
+            return;
+        }
+
+        $user->email = $trustedEmail;
+        self::syncOauthUserEmail((int)$user->id, $trustedEmail);
+    }
+
     private function createUserFromOauth(
         string $provider,
         array $meta,
@@ -714,27 +779,39 @@ class OauthService
 
         // 仅可信（已验证）第三方邮箱可写入本站账号；不可信则使用占位邮箱，引导用户后续绑定
         // v2_user.email / v2_oauth_user.email 均为 varchar(64)，必须严格控制长度
-        $email = null;
-        if (!empty($normalized['provider_email']) && $this->isProviderEmailTrusted($meta, $normalized)) {
-            $candidateEmail = strtolower(trim((string)$normalized['provider_email']));
-            if (strlen($candidateEmail) <= 64 && filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) {
-                $email = $candidateEmail;
-            }
+        $email = $this->resolveTrustedProviderEmail($meta, $normalized);
+        if ($email !== null && strlen($email) > 64) {
+            $email = null;
         }
-        if (!$email) {
+        if ($email === null) {
             $email = $this->buildOauthPlaceholderEmail(
                 $provider,
                 (string)($normalized['provider_user_id'] ?? '')
             );
         }
 
-        if (User::where('email', $email)->exists()) {
+        // 创建前再做一次邮箱合并兜底（并发下 findOrCreateUser 可能都未命中）
+        if (!preg_match('/@oauth\.local$/i', $email)) {
+            $existUser = $this->findUserByTrustedEmail(strtolower($email));
+            if ($existUser) {
+                if ($existUser->banned) {
+                    abort(403, '您的账号已被停用');
+                }
+                $this->bindUser($existUser, $provider, $normalized, $tokenData, $profile);
+                $this->maybeUpgradePlaceholderEmail($existUser, strtolower($email));
+                $existUser->last_login_at = time();
+                $existUser->save();
+                return $existUser;
+            }
+        }
+
+        if (User::whereRaw('LOWER(email) = ?', [strtolower($email)])->exists()) {
             $email = $this->buildOauthPlaceholderEmail(
                 $provider,
                 Helper::randomChar(16) . '_' . substr(md5((string)microtime(true)), 0, 8)
             );
             // 极端碰撞时再生成一次短哈希邮箱
-            if (User::where('email', $email)->exists()) {
+            if (User::whereRaw('LOWER(email) = ?', [strtolower($email)])->exists()) {
                 $email = substr(md5($provider . '|' . ($normalized['provider_user_id'] ?? '') . '|' . microtime(true)), 0, 32) . '@oauth.local';
             }
         }

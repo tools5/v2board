@@ -62,26 +62,74 @@ class OauthController extends Controller
             $sort = 'provider_user_id';
         }
 
-        $query = $this->buildBindingListQuery();
-        $this->applyFilters($request, $query);
+        // 列表按「本站用户」聚合：同一 user_id 的多个第三方绑定合并为一行。
+        $userIdQuery = UserOauth::query()
+            ->from('v2_user_oauth as ub')
+            ->leftJoin('v2_user as u', 'u.id', '=', 'ub.user_id');
+        if (Schema::hasTable('v2_oauth_user')) {
+            $userIdQuery->leftJoin('v2_oauth_user as ou', 'ou.user_id', '=', 'ub.user_id');
+        }
+        $this->applyFilters($request, $userIdQuery);
 
         if (in_array($sort, ['banned', 'expired_at'], true)) {
-            $query->orderBy('u.' . $sort, $sortType);
+            $userIdQuery->orderBy('u.' . $sort, $sortType);
         } elseif ($sort === 'email') {
-            $query->orderBy('u.email', $sortType);
-        } elseif (in_array($sort, ['provider', 'provider_user_id', 'created_at', 'updated_at', 'id', 'user_id'], true)) {
-            $query->orderBy('ub.' . $sort, $sortType);
+            $userIdQuery->orderBy('u.email', $sortType);
+        } elseif (in_array($sort, ['created_at', 'updated_at', 'id', 'user_id'], true)) {
+            $userIdQuery->orderByRaw('MAX(ub.' . $sort . ') ' . $sortType);
+        } elseif (in_array($sort, ['provider', 'provider_user_id'], true)) {
+            $userIdQuery->orderByRaw('MAX(ub.' . $sort . ') ' . $sortType);
         } else {
-            $query->orderBy('ub.created_at', $sortType);
+            $userIdQuery->orderByRaw('MAX(ub.created_at) ' . $sortType);
         }
 
-        $total = (clone $query)->count();
-        $rows = $query->forPage($current, $pageSize)->get();
+        $userIdQuery->groupBy('ub.user_id');
+        // 排序字段若引用 u.*，部分数据库要求 group by 一并包含
+        if (in_array($sort, ['banned', 'expired_at', 'email'], true)) {
+            $userIdQuery->groupBy('u.' . ($sort === 'email' ? 'email' : $sort));
+        }
 
-        $plans = Plan::get()->keyBy('id');
+        $distinctUserQuery = (clone $userIdQuery)->select('ub.user_id');
+        $total = (int)DB::query()
+            ->fromSub($distinctUserQuery, 'oauth_user_groups')
+            ->count();
+
+        $pageUserIds = (clone $userIdQuery)
+            ->select('ub.user_id')
+            ->forPage($current, $pageSize)
+            ->pluck('ub.user_id')
+            ->filter()
+            ->map(function ($userId) {
+                return (int)$userId;
+            })
+            ->values()
+            ->all();
+
         $data = [];
-        foreach ($rows as $row) {
-            $data[] = $this->formatBindingListRow($row, $plans);
+        if (!empty($pageUserIds)) {
+            $bindingQuery = $this->buildBindingListQuery()
+                ->whereIn('ub.user_id', $pageUserIds)
+                ->orderBy('ub.user_id', 'asc')
+                ->orderBy('ub.id', 'asc');
+            $bindingRows = $bindingQuery->get();
+            $plans = Plan::get()->keyBy('id');
+
+            $bindingsByUserId = [];
+            foreach ($bindingRows as $bindingRow) {
+                $userId = (int)$bindingRow->user_id;
+                if (!isset($bindingsByUserId[$userId])) {
+                    $bindingsByUserId[$userId] = [];
+                }
+                $bindingsByUserId[$userId][] = $bindingRow;
+            }
+
+            // 保持分页查询得到的用户顺序
+            foreach ($pageUserIds as $userId) {
+                if (empty($bindingsByUserId[$userId])) {
+                    continue;
+                }
+                $data[] = $this->formatUserGroupedListRow($bindingsByUserId[$userId], $plans);
+            }
         }
 
         return response([
@@ -104,7 +152,12 @@ class OauthController extends Controller
         $oauthUser = null;
         $user = null;
 
-        if ($id > 0) {
+        // 聚合列表优先按 user_id 打开用户详情
+        if ($userId > 0) {
+            $user = User::find($userId);
+        }
+
+        if (!$user && $id > 0) {
             $binding = UserOauth::find($id);
             if ($binding) {
                 $user = User::find($binding->user_id);
@@ -114,10 +167,6 @@ class OauthController extends Controller
                     $user = User::find($oauthUser->user_id);
                 }
             }
-        }
-
-        if (!$user && $userId > 0) {
-            $user = User::find($userId);
         }
 
         if (!$user) {
@@ -820,6 +869,75 @@ class OauthController extends Controller
             'is_oauth_managed' => $isOauthManaged,
             'account_type' => $isOauthManaged ? 'oauth_registered' : 'email_bound',
             'account_type_label' => $isOauthManaged ? 'OAuth注册' : '邮箱用户绑定',
+        ];
+    }
+
+    /**
+     * 将同一本站用户的多条第三方绑定聚合成列表一行。
+     *
+     * @param array<int, object> $bindingRows
+     */
+    private function formatUserGroupedListRow(array $bindingRows, $plans): array
+    {
+        $primaryRow = $bindingRows[0];
+        $formatted = $this->formatBindingListRow($primaryRow, $plans);
+
+        $bindings = [];
+        $providerNames = [];
+        $passwordNeverSet = 0;
+        $latestCreatedAt = $primaryRow->created_at;
+        $latestUpdatedAt = $primaryRow->updated_at;
+
+        foreach ($bindingRows as $bindingRow) {
+            $item = $this->formatBindingSummaryFromListRow($bindingRow);
+            $bindings[] = $item;
+            $providerNames[] = $item['provider_name'];
+            if ((int)$bindingRow->password_never_set === 1) {
+                $passwordNeverSet = 1;
+            }
+            if ($bindingRow->created_at > $latestCreatedAt) {
+                $latestCreatedAt = $bindingRow->created_at;
+            }
+            if ($bindingRow->updated_at > $latestUpdatedAt) {
+                $latestUpdatedAt = $bindingRow->updated_at;
+            }
+        }
+
+        $formatted['bindings'] = $bindings;
+        $formatted['binding_count'] = count($bindings);
+        $formatted['providers'] = array_values(array_unique(array_map(function ($binding) {
+            return $binding['provider'];
+        }, $bindings)));
+        $formatted['provider_names'] = array_values(array_unique($providerNames));
+        $formatted['provider_name'] = implode(' / ', $formatted['provider_names']);
+        $formatted['password_never_set'] = $passwordNeverSet;
+        $formatted['created_at'] = $latestCreatedAt;
+        $formatted['updated_at'] = $latestUpdatedAt;
+        // 聚合行用 user_id 作为稳定主键；单绑定 id 仍保留 primary binding_id 便于兼容旧前端
+        $formatted['row_key'] = 'user_' . $formatted['user_id'];
+
+        return $formatted;
+    }
+
+    private function formatBindingSummaryFromListRow($row): array
+    {
+        $provider = (string)$row->provider;
+        $meta = OauthProviderRegistry::get($provider) ?: [];
+        return [
+            'id' => $row->id,
+            'binding_id' => $row->id,
+            'user_id' => $row->user_id,
+            'provider' => $provider,
+            'provider_name' => $meta['name'] ?? $provider,
+            'provider_user_id' => $row->provider_user_id,
+            'external_id_label' => $this->externalIdLabel($provider),
+            'external_id' => $row->provider_user_id,
+            'provider_username' => $row->provider_username,
+            'provider_email' => $row->provider_email,
+            'provider_avatar' => $row->provider_avatar,
+            'password_never_set' => (int)$row->password_never_set,
+            'created_at' => $row->created_at,
+            'updated_at' => $row->updated_at,
         ];
     }
 

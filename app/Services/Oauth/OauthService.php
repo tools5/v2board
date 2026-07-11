@@ -713,17 +713,30 @@ class OauthService
         $inviteUserId = $this->resolveInviteUserIdForRegistration($inviteCode);
 
         // 仅可信（已验证）第三方邮箱可写入本站账号；不可信则使用占位邮箱，引导用户后续绑定
+        // v2_user.email / v2_oauth_user.email 均为 varchar(64)，必须严格控制长度
         $email = null;
         if (!empty($normalized['provider_email']) && $this->isProviderEmailTrusted($meta, $normalized)) {
-            $email = $normalized['provider_email'];
+            $candidateEmail = strtolower(trim((string)$normalized['provider_email']));
+            if (strlen($candidateEmail) <= 64 && filter_var($candidateEmail, FILTER_VALIDATE_EMAIL)) {
+                $email = $candidateEmail;
+            }
         }
         if (!$email) {
-            $safeId = preg_replace('/[^a-zA-Z0-9_\-]/', '', $normalized['provider_user_id']);
-            $email = $provider . '_' . $safeId . '@oauth.local';
+            $email = $this->buildOauthPlaceholderEmail(
+                $provider,
+                (string)($normalized['provider_user_id'] ?? '')
+            );
         }
 
         if (User::where('email', $email)->exists()) {
-            $email = $provider . '_' . Helper::guid() . '@oauth.local';
+            $email = $this->buildOauthPlaceholderEmail(
+                $provider,
+                Helper::randomChar(16) . '_' . substr(md5((string)microtime(true)), 0, 8)
+            );
+            // 极端碰撞时再生成一次短哈希邮箱
+            if (User::where('email', $email)->exists()) {
+                $email = substr(md5($provider . '|' . ($normalized['provider_user_id'] ?? '') . '|' . microtime(true)), 0, 32) . '@oauth.local';
+            }
         }
 
         $user = new User();
@@ -765,6 +778,50 @@ class OauthService
         $this->lastUserWasCreated = true;
 
         return $user;
+    }
+
+    /**
+     * 生成不超过 64 字符的 OAuth 占位邮箱（对齐 v2_user.email varchar(64)）。
+     * 格式：{provider}_{id_or_hash}@oauth.local
+     */
+    private function buildOauthPlaceholderEmail(string $provider, string $providerUserId): string
+    {
+        $domainSuffix = '@oauth.local';
+        $maxEmailLength = 64;
+        $maxLocalPartLength = $maxEmailLength - strlen($domainSuffix);
+
+        $providerPart = preg_replace('/[^a-zA-Z0-9_\-]/', '', $provider);
+        if ($providerPart === null || $providerPart === '') {
+            $providerPart = 'oauth';
+        }
+        // 平台名过长时压缩，保证后面还能放下 id/hash
+        if (strlen($providerPart) > 16) {
+            $providerPart = substr($providerPart, 0, 16);
+        }
+
+        $safeId = preg_replace('/[^a-zA-Z0-9_\-]/', '', $providerUserId);
+        if ($safeId === null || $safeId === '') {
+            $safeId = substr(md5($provider . '|' . $providerUserId), 0, 16);
+        }
+
+        $localPrefix = $providerPart . '_';
+        $idBudget = $maxLocalPartLength - strlen($localPrefix);
+        if ($idBudget < 8) {
+            // 极端情况：整段 local 用短哈希
+            return substr(md5($provider . '|' . $providerUserId), 0, $maxLocalPartLength) . $domainSuffix;
+        }
+
+        if (strlen($safeId) > $idBudget) {
+            // 超长第三方 ID（如 Microsoft OID）改为稳定短哈希，仍可与平台前缀区分
+            $safeId = substr(hash('sha256', $provider . '|' . $providerUserId), 0, min(32, $idBudget));
+        }
+
+        $email = $localPrefix . $safeId . $domainSuffix;
+        if (strlen($email) > $maxEmailLength) {
+            $email = substr(md5($provider . '|' . $providerUserId), 0, 32) . $domainSuffix;
+        }
+
+        return $email;
     }
 
     /**

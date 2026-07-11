@@ -181,6 +181,11 @@ class OauthController extends Controller
             $oauthUser = OauthUser::where('user_id', $user->id)->first();
         }
 
+        $onlineStats = $this->resolveUserOnlineStats((int)$user->id);
+        $user['alive_ip'] = $onlineStats['alive_ip'];
+        $user['ips'] = $onlineStats['ips'];
+        $user['is_online'] = $onlineStats['is_online'];
+
         $allBindings = UserOauth::where('user_id', $user->id)->get()->map(function ($item) {
             return $this->formatBindingSummary($item);
         })->values();
@@ -223,6 +228,9 @@ class OauthController extends Controller
                 'user' => $user,
                 'bindings' => $allBindings,
                 'is_oauth_managed' => (bool)$oauthUser,
+                'alive_ip' => $onlineStats['alive_ip'],
+                'ips' => $onlineStats['ips'],
+                'is_online' => $onlineStats['is_online'],
             ],
         ]);
     }
@@ -481,7 +489,7 @@ class OauthController extends Controller
         $rows = $query->get();
         $plans = Plan::get()->keyBy('id');
 
-        $data = "用户ID,邮箱,账号类型,平台,平台名称,外部ID标签,外部ID,第三方用户名,第三方邮箱,TGID,是否未设密码,套餐,总流量GB,已用流量GB,到期时间,余额,是否封禁,订阅地址,绑定时间\r\n";
+        $data = "用户ID,邮箱,账号类型,平台,平台名称,外部ID标签,外部ID,第三方用户名,第三方邮箱,TGID,是否未设密码,套餐,总流量GB,已用流量GB,到期时间,余额,是否在线,在线设备数,设备数限制,在线IP,是否封禁,订阅地址,绑定时间\r\n";
         foreach ($rows as $row) {
             $provider = $row->provider;
             $meta = OauthProviderRegistry::get($provider) ?: [];
@@ -498,8 +506,11 @@ class OauthController extends Controller
             $created = $row->created_at ? date('Y-m-d H:i:s', is_numeric($row->created_at) ? $row->created_at : strtotime((string)$row->created_at)) : '';
             $email = $row->email ?: $row->oauth_email;
             $accountType = $row->oauth_user_id ? 'OAuth注册' : '邮箱用户绑定';
+            $onlineStats = $this->resolveUserOnlineStats((int)$row->user_id);
+            $isOnlineLabel = $onlineStats['is_online'] ? '是' : '否';
+            $deviceLimit = $row->device_limit === null || $row->device_limit === '' ? '∞' : $row->device_limit;
             $data .= sprintf(
-                "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\r\n",
+                "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\r\n",
                 $row->user_id,
                 $this->csvCell($email),
                 $this->csvCell($accountType),
@@ -516,6 +527,10 @@ class OauthController extends Controller
                 $used,
                 $expire,
                 $balance,
+                $isOnlineLabel,
+                $onlineStats['alive_ip'],
+                $this->csvCell($deviceLimit),
+                $this->csvCell($onlineStats['ips']),
                 $banned,
                 $this->csvCell($subscribe),
                 $created
@@ -805,20 +820,7 @@ class OauthController extends Controller
             $planName = $plans[$row->plan_id]->name;
         }
 
-        $countAlive = 0;
-        $ips = [];
-        $ipsArray = Cache::get('ALIVE_IP_USER_' . $row->user_id);
-        if ($ipsArray) {
-            $countAlive = $ipsArray['alive_ip'] ?? 0;
-            foreach ($ipsArray as $nodeTypeId => $data) {
-                if (!is_int($data) && isset($data['aliveips'])) {
-                    foreach ($data['aliveips'] as $ipNodeId) {
-                        $ip = explode('_', $ipNodeId)[0];
-                        $ips[] = $ip . '_' . $nodeTypeId;
-                    }
-                }
-            }
-        }
+        $onlineStats = $this->resolveUserOnlineStats((int)$row->user_id);
 
         $email = $row->email ?: $row->oauth_email;
         $isOauthManaged = !empty($row->oauth_user_id);
@@ -858,8 +860,10 @@ class OauthController extends Controller
             'token' => $row->token,
             'uuid' => $row->uuid,
             'subscribe_url' => $row->token ? Helper::getSubscribeUrl($row->token) : null,
-            'alive_ip' => $countAlive,
-            'ips' => implode(', ', $ips),
+            // 与用户管理一致：在线设备数 / IP 明细 / 是否在线
+            'alive_ip' => $onlineStats['alive_ip'],
+            'ips' => $onlineStats['ips'],
+            'is_online' => $onlineStats['is_online'],
             'created_at' => $row->created_at,
             'updated_at' => $row->updated_at,
             'user_created_at' => $row->user_created_at,
@@ -869,6 +873,46 @@ class OauthController extends Controller
             'is_oauth_managed' => $isOauthManaged,
             'account_type' => $isOauthManaged ? 'oauth_registered' : 'email_bound',
             'account_type_label' => $isOauthManaged ? 'OAuth注册' : '邮箱用户绑定',
+        ];
+    }
+
+    /**
+     * 读取节点上报的在线设备缓存，逻辑与 Admin\UserController 保持一致。
+     *
+     * @return array{alive_ip:int,ips:string,is_online:bool}
+     */
+    private function resolveUserOnlineStats(int $userId): array
+    {
+        $aliveIpCount = 0;
+        $ipList = [];
+        if ($userId <= 0) {
+            return [
+                'alive_ip' => 0,
+                'ips' => '',
+                'is_online' => false,
+            ];
+        }
+
+        $ipsArray = Cache::get('ALIVE_IP_USER_' . $userId);
+        if (is_array($ipsArray)) {
+            $aliveIpCount = (int)($ipsArray['alive_ip'] ?? 0);
+            foreach ($ipsArray as $nodeTypeId => $nodeData) {
+                if (is_int($nodeData) || !isset($nodeData['aliveips']) || !is_array($nodeData['aliveips'])) {
+                    continue;
+                }
+                foreach ($nodeData['aliveips'] as $ipNodeId) {
+                    $ip = explode('_', (string)$ipNodeId)[0];
+                    if ($ip !== '') {
+                        $ipList[] = $ip . '_' . $nodeTypeId;
+                    }
+                }
+            }
+        }
+
+        return [
+            'alive_ip' => $aliveIpCount,
+            'ips' => implode(', ', $ipList),
+            'is_online' => $aliveIpCount > 0,
         ];
     }
 

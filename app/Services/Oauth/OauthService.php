@@ -922,7 +922,7 @@ class OauthService
         $oauthUser->primary_provider_user_id = (string)($normalized['provider_user_id'] ?? '');
         $oauthUser->primary_provider_username = $normalized['provider_username'] ?? null;
         $oauthUser->primary_provider_email = $normalized['provider_email'] ?? null;
-        $oauthUser->primary_provider_avatar = $normalized['provider_avatar'] ?? null;
+        $oauthUser->primary_provider_avatar = $this->sanitizeAvatarUrl($normalized['provider_avatar'] ?? null);
         $oauthUser->password_never_set = 1;
         $oauthUser->save();
     }
@@ -944,7 +944,7 @@ class OauthService
                 $table->string('primary_provider_user_id', 128);
                 $table->string('primary_provider_username', 128)->nullable();
                 $table->string('primary_provider_email', 128)->nullable();
-                $table->string('primary_provider_avatar', 512)->nullable();
+                $table->text('primary_provider_avatar')->nullable();
                 $table->tinyInteger('password_never_set')->default(1);
                 $table->text('remarks')->nullable();
                 $table->integer('created_at');
@@ -1077,7 +1077,8 @@ class OauthService
         $binding->provider_user_id = $normalized['provider_user_id'];
         $binding->provider_username = $normalized['provider_username'];
         $binding->provider_email = $normalized['provider_email'];
-        $binding->provider_avatar = $normalized['provider_avatar'];
+        // 头像 URL（尤其 Google）可能超长；列已放宽为 TEXT，但对未迁移的旧库仍做安全兜底截断，避免整体绑定失败。
+        $binding->provider_avatar = $this->sanitizeAvatarUrl($normalized['provider_avatar']);
         $binding->access_token = $tokenData['access_token'] ?? null;
         $binding->refresh_token = $tokenData['refresh_token'] ?? null;
         $binding->raw = json_encode($profile, JSON_UNESCAPED_UNICODE);
@@ -1092,10 +1093,28 @@ class OauthService
                 $oauthUser->primary_provider_user_id = $normalized['provider_user_id'];
                 $oauthUser->primary_provider_username = $normalized['provider_username'];
                 $oauthUser->primary_provider_email = $normalized['provider_email'];
-                $oauthUser->primary_provider_avatar = $normalized['provider_avatar'];
+                $oauthUser->primary_provider_avatar = $this->sanitizeAvatarUrl($normalized['provider_avatar']);
                 $oauthUser->save();
             }
         }
+    }
+
+    /**
+     * 头像 URL 安全处理：
+     * 迁移后头像列为 TEXT，正常无需截断；但对未执行迁移的旧库（varchar(512)），
+     * 超长的 Google 头像 URL 会触发 SQLSTATE[22001] 导致整体绑定失败，
+     * 因此这里做兜底截断，宁可头像略短也不要让绑定挂掉。
+     */
+    private function sanitizeAvatarUrl($avatar): ?string
+    {
+        if (!is_string($avatar) || $avatar === '') {
+            return null;
+        }
+        // 上限给到 2048（TEXT 足够容纳），仅拦截异常超长值。
+        if (mb_strlen($avatar) > 2048) {
+            return mb_substr($avatar, 0, 2048);
+        }
+        return $avatar;
     }
 
     public function unbind(int $userId, string $provider): void

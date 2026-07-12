@@ -185,6 +185,54 @@
     }, 50);
   }
 
+  function openOauthPopup(url) {
+    var popupWidth = 500;
+    var popupHeight = 600;
+    var screenLeft = window.screenLeft !== undefined ? window.screenLeft : window.screenX;
+    var screenTop = window.screenTop !== undefined ? window.screenTop : window.screenY;
+    var windowWidth = window.innerWidth || document.documentElement.clientWidth || screen.width;
+    var windowHeight = window.innerHeight || document.documentElement.clientHeight || screen.height;
+    var left = screenLeft + Math.round((windowWidth - popupWidth) / 2);
+    var top = screenTop + Math.round((windowHeight - popupHeight) / 2);
+    var features = 'width=' + popupWidth + ',height=' + popupHeight + ',left=' + left + ',top=' + top +
+      ',menubar=no,toolbar=no,location=yes,status=no,scrollbars=yes,resizable=yes';
+    var popup = window.open(url, 'v2board_oauth_popup', features);
+    if (!popup || popup.closed) {
+      alert('弹窗被浏览器拦截，请允许本站弹窗后重试');
+    }
+  }
+
+  function handleOauthPopupMessage(event) {
+    if (event.origin !== location.origin) return;
+    var data = event.data;
+    if (!data || data._source !== 'v2board_oauth_popup') return;
+
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+
+    if (data.type === 'login' && data.auth_data) {
+      setAuthData(data.auth_data);
+      try {
+        sessionStorage.removeItem(INVITE_STORAGE_KEY);
+      } catch (e) {}
+      if (data.is_new) {
+        try {
+          sessionStorage.setItem(SETUP_PENDING_KEY, '1');
+        } catch (e) {}
+        location.hash = '#/dashboard?oauth_setup=1';
+      } else {
+        location.hash = '#/dashboard';
+      }
+      setTimeout(function () {
+        location.reload();
+      }, 50);
+    }
+  }
+
+  window.addEventListener('message', handleOauthPopupMessage);
+
   function postTelegramLogin(user, inviteCode) {
     var body = Object.assign({}, user || {});
     if (inviteCode) body.invite_code = inviteCode;
@@ -294,16 +342,18 @@
       if (!item.redirect_url) return;
       var a = document.createElement('a');
       a.className = 'oauth-btn';
-      a.href = item.redirect_url;
+      a.href = '#';
       a.textContent = item.button_text || ('使用 ' + item.name + ' 登录');
       a.style.background = item.button_color || '#222';
       a.addEventListener('click', function (event) {
+        event.preventDefault();
         var inviteCode = requireInviteIfNeeded(inviteForce, box);
         if (inviteCode === null) {
-          event.preventDefault();
           return;
         }
-        a.href = appendInviteToUrl(item.redirect_url, inviteCode);
+        var popupUrl = item.redirect_url + (item.redirect_url.indexOf('?') >= 0 ? '&' : '?') + 'popup=1';
+        popupUrl = appendInviteToUrl(popupUrl, inviteCode);
+        openOauthPopup(popupUrl);
       });
       box.appendChild(a);
     });

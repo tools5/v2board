@@ -47,7 +47,7 @@ class OauthService
         abort(500, '第三方登录数据表缺失，请执行 php artisan migrate 或导入 database/update_oauth.sql');
     }
 
-    public function buildAuthorizeUrl(string $provider, string $mode = 'login', ?int $userId = null, ?string $inviteCode = null): string
+    public function buildAuthorizeUrl(string $provider, string $mode = 'login', ?int $userId = null, ?string $inviteCode = null, bool $isPopup = false): string
     {
         self::ensureTableExists();
         $meta = OauthProviderRegistry::get($provider);
@@ -69,6 +69,7 @@ class OauthService
             'mode' => $mode,
             'user_id' => $userId,
             'invite_code' => $normalizedInviteCode,
+            'popup' => $isPopup,
             'created_at' => time(),
         ], 600);
 
@@ -165,9 +166,9 @@ class OauthService
         return [
             'mode' => 'login',
             'user' => $user,
-            // 是否为本次新注册用户：用于引导跳转「完善信息」页
             'is_new' => $this->lastUserWasCreated,
             'auth' => (new AuthService($user))->generateAuthData($request),
+            'popup' => !empty($stateData['popup']),
         ];
     }
 

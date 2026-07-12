@@ -31,11 +31,13 @@ class OauthController extends Controller
 
         $oauthService = new OauthService();
         $inviteCode = $request->input('invite_code');
+        $isPopup = (bool)$request->input('popup', false);
         $url = $oauthService->buildAuthorizeUrl(
             $provider,
             'login',
             null,
-            is_string($inviteCode) ? $inviteCode : null
+            is_string($inviteCode) ? $inviteCode : null,
+            $isPopup
         );
         return redirect()->away($url);
     }
@@ -56,14 +58,29 @@ class OauthController extends Controller
             $result = $oauthService->handleCallback($provider, $request);
         } catch (\Throwable $exception) {
             $message = $exception->getMessage() ?: '第三方登录失败';
-            return $this->redirectWithMessage($message, true);
+            return $this->popupOrRedirectOnError($message);
         }
 
+        $isPopup = !empty($result['popup']);
+
         if (($result['mode'] ?? '') === 'bind') {
+            if ($isPopup) {
+                return $this->popupPostMessage(['type' => 'bind', 'success' => true]);
+            }
             return $this->redirectWithMessage('绑定成功', false, '/#/profile');
         }
 
         $user = $result['user'];
+        $authData = $result['auth'] ?? (new AuthService($user))->generateAuthData($request);
+
+        if ($isPopup) {
+            return $this->popupPostMessage([
+                'type' => 'login',
+                'auth_data' => $authData['auth_data'] ?? null,
+                'is_new' => !empty($result['is_new']),
+            ]);
+        }
+
         $extraQuery = !empty($result['is_new']) ? ['oauth_setup' => 1] : [];
         $loginUrl = $oauthService->createLoginRedirect($user, 'dashboard', $extraQuery);
         return redirect()->away($loginUrl);
@@ -130,5 +147,92 @@ class OauthController extends Controller
             return redirect()->away(rtrim(config('v2board.app_url'), '/') . $path);
         }
         return redirect()->away(url($path));
+    }
+
+    /**
+     * 异常时自动判断：如果当前窗口是弹窗（有 opener），用 postMessage 传递错误；否则常规重定向。
+     * 因为异常发生时 state 可能已被消耗，无法从缓存得知是否为 popup 模式，
+     * 所以返回一段 HTML 在客户端自动检测。
+     */
+    private function popupOrRedirectOnError(string $message)
+    {
+        $escapedMessage = json_encode($message, JSON_UNESCAPED_UNICODE);
+        $fallbackUrl = $this->buildErrorRedirectUrl($message);
+        $html = <<<HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>登录失败</title></head>
+<body>
+<script>
+(function() {
+    var msg = {$escapedMessage};
+    if (window.opener) {
+        var data = { error: msg, _source: 'v2board_oauth_popup' };
+        window.opener.postMessage(data, location.origin);
+        window.close();
+    } else {
+        location.href = {$this->jsonEncode($fallbackUrl)};
+    }
+})();
+</script>
+<noscript><p>登录失败：{$this->escapeHtml($message)}</p></noscript>
+</body>
+</html>
+HTML;
+        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    /**
+     * 返回一段极简 HTML，通过 window.opener.postMessage 将结果传回主窗口并关闭弹窗。
+     * 使用 targetOrigin = location.origin 确保只向同源父窗口发送数据。
+     */
+    private function popupPostMessage(array $payload)
+    {
+        $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
+        $html = <<<HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>登录中...</title></head>
+<body>
+<script>
+(function() {
+    var data = {$jsonPayload};
+    data._source = 'v2board_oauth_popup';
+    if (window.opener) {
+        window.opener.postMessage(data, location.origin);
+    }
+    window.close();
+    setTimeout(function() {
+        document.body.innerHTML = '<p style="text-align:center;margin-top:40px;">登录完成，请关闭此窗口。</p>';
+    }, 500);
+})();
+</script>
+</body>
+</html>
+HTML;
+        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    private function buildErrorRedirectUrl(string $message): string
+    {
+        $query = http_build_query([
+            'oauth_msg' => $message,
+            'oauth_error' => 1,
+        ]);
+        $path = '/#/login?' . $query;
+        if (config('v2board.app_url')) {
+            return rtrim(config('v2board.app_url'), '/') . $path;
+        }
+        return url($path);
+    }
+
+    private function jsonEncode(string $value): string
+    {
+        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    private function escapeHtml(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
     }
 }

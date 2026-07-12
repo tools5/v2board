@@ -74,9 +74,13 @@ class OauthController extends Controller
         $authData = $result['auth'] ?? (new AuthService($user))->generateAuthData($request);
 
         if ($isPopup) {
+            // 弹窗登录需回传完整凭证，主题侧用 token + auth_data 完成会话
             return $this->popupPostMessage([
                 'type' => 'login',
                 'auth_data' => $authData['auth_data'] ?? null,
+                'token' => $authData['token'] ?? null,
+                'is_admin' => $authData['is_admin'] ?? 0,
+                'is_staff' => $authData['is_staff'] ?? 0,
                 'is_new' => !empty($result['is_new']),
             ]);
         }

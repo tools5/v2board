@@ -35,7 +35,14 @@ class OauthController extends Controller
         }
 
         $oauthService = new OauthService();
-        $url = $oauthService->buildAuthorizeUrl($provider, 'bind', (int)$request->user['id']);
+        $isPopup = (bool)$request->input('popup', false);
+        $url = $oauthService->buildAuthorizeUrl(
+            $provider,
+            'bind',
+            (int)$request->user['id'],
+            null,
+            $isPopup
+        );
         return response([
             'data' => $url,
         ]);

@@ -157,6 +157,7 @@ class OauthService
             return [
                 'mode' => 'bind',
                 'user' => $user,
+                'popup' => !empty($stateData['popup']),
             ];
         }
 

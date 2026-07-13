@@ -12,17 +12,19 @@ class TelegramController extends Controller
     protected $commands = [];
     protected $telegramService;
 
-    public function __construct(Request $request)
+    public function __construct()
+    {
+        // Do not validate access_token in constructor.
+        // Route registration / route:list must not abort during controller resolution.
+    }
+
+    public function webhook(Request $request)
     {
         if ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
             abort(401);
         }
 
         $this->telegramService = new TelegramService();
-    }
-
-    public function webhook(Request $request)
-    {
         $this->formatMessage($request->input());
         $this->formatChatJoinRequest($request->input());
         $this->handle();

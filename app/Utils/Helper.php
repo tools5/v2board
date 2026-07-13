@@ -207,8 +207,8 @@ class Helper
     public static function getRealClientIp($request = null)
     {
         $request = $request ?: request();
-        $candidates = [];
 
+        // 同时读 header / server 超全局，兼容 Nginx 只写 $_SERVER 的情况
         $headerCandidates = [
             'CF-Connecting-IP' => ['HTTP_CF_CONNECTING_IP', 'CF-Connecting-IP'],
             'True-Client-IP' => ['HTTP_TRUE_CLIENT_IP', 'True-Client-IP'],
@@ -240,67 +240,35 @@ class Helper
                 continue;
             }
 
-            foreach (explode(',', $headerValue) as $ipPart) {
-                $candidateIp = self::normalizeIpCandidate(trim($ipPart));
-                if ($candidateIp) {
-                    $candidates[] = $candidateIp;
-                }
+            // X-Forwarded-For 可能是 "client, proxy1, proxy2"
+            $ipParts = explode(',', $headerValue);
+            $candidateIp = trim($ipParts[0]);
+            // 去掉端口形式 1.2.3.4:1234
+            if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/', $candidateIp, $matches)) {
+                $candidateIp = $matches[1];
             }
-        }
-
-        $fallbackIp = self::normalizeIpCandidate($request->ip());
-        if ($fallbackIp) {
-            $candidates[] = $fallbackIp;
-        }
-
-        $remoteAddr = $request->server('REMOTE_ADDR') ?: (isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : null);
-        $remoteAddr = self::normalizeIpCandidate($remoteAddr);
-        if ($remoteAddr) {
-            $candidates[] = $remoteAddr;
-        }
-
-        // Prefer non-loopback so 127.0.0.1 does not hide the real client IP.
-        foreach ($candidates as $candidateIp) {
-            if (!self::isLoopbackIp($candidateIp)) {
+            if (self::isValidPublicOrPrivateIp($candidateIp)) {
                 return $candidateIp;
             }
         }
-        foreach ($candidates as $candidateIp) {
-            return $candidateIp;
+
+        $fallbackIp = $request->ip();
+        if ($fallbackIp && self::isValidPublicOrPrivateIp($fallbackIp)) {
+            return $fallbackIp;
         }
 
-        return '0.0.0.0';
+        $remoteAddr = $request->server('REMOTE_ADDR') ?: (isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : null);
+        if ($remoteAddr && self::isValidPublicOrPrivateIp($remoteAddr)) {
+            return $remoteAddr;
+        }
+
+        return $fallbackIp ?: '0.0.0.0';
     }
 
-    private static function normalizeIpCandidate($ip)
-    {
-        if ($ip === null || $ip === false || $ip === '') {
-            return null;
-        }
-        $candidateIp = trim((string) $ip);
-        if ($candidateIp === '') {
-            return null;
-        }
-        if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/', $candidateIp, $matches)) {
-            $candidateIp = $matches[1];
-        }
-        if (preg_match('/^\[([^\]]+)\]:\d+$/', $candidateIp, $matches)) {
-            $candidateIp = $matches[1];
-        }
-        if (!self::isValidPublicOrPrivateIp($candidateIp)) {
-            return null;
-        }
-        return $candidateIp;
-    }
-
-    private static function isLoopbackIp($ip)
-    {
-        if ($ip === '127.0.0.1' || $ip === '::1' || $ip === '0.0.0.0') {
-            return true;
-        }
-        return strpos($ip, '127.') === 0;
-    }
-
+    /**
+     * @param string $ip
+     * @return bool
+     */
     private static function isValidPublicOrPrivateIp($ip)
     {
         return (bool) filter_var(

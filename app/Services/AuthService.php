@@ -94,102 +94,66 @@ class AuthService
     {
         $cacheKey = CacheKey::get("USER_SESSIONS", $this->user->id);
         $sessions = (array)Cache::get($cacheKey, []);
-        $realClientIp = Helper::getRealClientIp($request);
-        $userAgent = $request->userAgent();
-
-        $authorization = $request->input('auth_data') ?? $request->header('authorization');
-        if (is_string($authorization)) {
-            $authorization = trim($authorization);
-            if (stripos($authorization, 'Bearer ') === 0) {
-                $authorization = trim(substr($authorization, 7));
-            }
+        if (empty($sessions)) {
+            return $sessions;
         }
 
-        if (empty($sessions)) {
-            return [
-                'sessions' => [],
-                'current_ip' => $realClientIp,
-            ];
+        $authorization = $request->input('auth_data') ?? $request->header('authorization');
+        if (!$authorization) {
+            return $sessions;
         }
 
         $currentSessionId = null;
-        if ($authorization) {
-            foreach ($sessions as $sessionId => $sessionMeta) {
-                if (!is_array($sessionMeta)) {
-                    continue;
-                }
-                $metaAuth = isset($sessionMeta['auth_data']) ? trim((string) $sessionMeta['auth_data']) : '';
-                if ($metaAuth !== '' && $metaAuth === $authorization) {
-                    $currentSessionId = $sessionId;
-                    break;
-                }
+        foreach ($sessions as $sessionId => $sessionMeta) {
+            if (!is_array($sessionMeta)) {
+                continue;
             }
-
-            if ($currentSessionId === null) {
-                try {
-                    $payload = (array)JWT::decode($authorization, new Key(config('app.key'), 'HS256'));
-                    if (!empty($payload['session']) && isset($sessions[$payload['session']])) {
-                        $currentSessionId = $payload['session'];
-                    }
-                } catch (\Exception $exception) {
-                    // ignore
-                }
+            if (!empty($sessionMeta['auth_data']) && $sessionMeta['auth_data'] === $authorization) {
+                $currentSessionId = $sessionId;
+                break;
             }
         }
 
-        // 找不到精确会话时，回退更新最近一条（登录时间最新）
+        // 兼容：缓存里 meta 没有 auth_data 时，从 JWT payload 解析 session
         if ($currentSessionId === null) {
-            $latestLoginAt = -1;
-            foreach ($sessions as $sessionId => $sessionMeta) {
-                if (!is_array($sessionMeta)) {
-                    continue;
+            try {
+                $payload = (array)JWT::decode($authorization, new Key(config('app.key'), 'HS256'));
+                if (!empty($payload['session']) && isset($sessions[$payload['session']])) {
+                    $currentSessionId = $payload['session'];
                 }
-                $loginAt = isset($sessionMeta['login_at']) ? (int) $sessionMeta['login_at'] : 0;
-                if ($loginAt >= $latestLoginAt) {
-                    $latestLoginAt = $loginAt;
-                    $currentSessionId = $sessionId;
-                }
+            } catch (\Exception $exception) {
+                // ignore
             }
         }
 
-        if ($currentSessionId !== null && isset($sessions[$currentSessionId]) && is_array($sessions[$currentSessionId])) {
-            $sessionMeta = $sessions[$currentSessionId];
-            $shouldPersist = false;
-            $existingIp = isset($sessionMeta['ip']) ? (string) $sessionMeta['ip'] : '';
-
-            if ($realClientIp && ($existingIp === '' || $existingIp !== $realClientIp || self::isStoredIpUnusable($existingIp))) {
-                $sessionMeta['ip'] = $realClientIp;
-                $shouldPersist = true;
-            }
-            if ($userAgent && (empty($sessionMeta['ua']) || $sessionMeta['ua'] !== $userAgent)) {
-                $sessionMeta['ua'] = $userAgent;
-                $shouldPersist = true;
-            }
-            if ($authorization && empty($sessionMeta['auth_data'])) {
-                $sessionMeta['auth_data'] = $authorization;
-                $shouldPersist = true;
-            }
-
-            if ($shouldPersist) {
-                $sessions[$currentSessionId] = $sessionMeta;
-                Cache::put($cacheKey, $sessions);
-            }
+        if ($currentSessionId === null || !isset($sessions[$currentSessionId]) || !is_array($sessions[$currentSessionId])) {
+            return $sessions;
         }
 
-        return [
-            'sessions' => $sessions,
-            'current_ip' => $realClientIp,
-            'current_session_id' => $currentSessionId,
-        ];
-    }
+        $realClientIp = Helper::getRealClientIp($request);
+        $userAgent = $request->userAgent();
+        $sessionMeta = $sessions[$currentSessionId];
+        $shouldPersist = false;
 
-    private static function isStoredIpUnusable($ip)
-    {
-        $ip = trim((string) $ip);
-        if ($ip === '' || $ip === '0.0.0.0' || $ip === '127.0.0.1' || $ip === '::1') {
-            return true;
+        if ($realClientIp && (!isset($sessionMeta['ip']) || $sessionMeta['ip'] !== $realClientIp)) {
+            $sessionMeta['ip'] = $realClientIp;
+            $shouldPersist = true;
         }
-        return strpos($ip, '127.') === 0;
+        if ($userAgent && empty($sessionMeta['ua'])) {
+            $sessionMeta['ua'] = $userAgent;
+            $shouldPersist = true;
+        }
+        if (empty($sessionMeta['auth_data'])) {
+            $sessionMeta['auth_data'] = $authorization;
+            $shouldPersist = true;
+        }
+
+        if ($shouldPersist) {
+            $sessions[$currentSessionId] = $sessionMeta;
+            Cache::put($cacheKey, $sessions);
+        }
+
+        return $sessions;
     }
 
     public function removeSession($sessionId)

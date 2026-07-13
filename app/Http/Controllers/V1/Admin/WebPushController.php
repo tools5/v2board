@@ -269,39 +269,47 @@ class WebPushController extends Controller
             abort(500, '写入推送记录失败：' . $error->getMessage());
         }
 
-        // Default to queue; fall back to sync when Redis/Horizon is unavailable.
+        // Always prefer queue for HTTP requests.
+        // Sync send can take minutes (FCM/network) and will crash Webman → Cloudflare 502.
         $forceSync = (bool)$request->input('sync', false);
-        $usedSync = $forceSync;
 
-        try {
-            if ($forceSync) {
-                SendCustomWebPushJob::dispatchNow($message->id);
-            } else {
-                SendCustomWebPushJob::dispatch($message->id);
-            }
-        } catch (\Throwable $queueError) {
-            \Log::warning('Web Push queue dispatch failed, falling back to sync', [
-                'message_id' => $message->id,
-                'reason' => $queueError->getMessage(),
-            ]);
+        if ($forceSync) {
             try {
+                // Bound work: only for small tests. Prefer queue in production.
+                set_time_limit(60);
                 SendCustomWebPushJob::dispatchNow($message->id);
-                $usedSync = true;
+                $message = $message->fresh() ?: $message;
+                return response([
+                    'data' => $message,
+                    'meta' => ['mode' => 'sync'],
+                ]);
             } catch (\Throwable $syncError) {
                 $message->status = 'failed';
                 $message->error_message = $syncError->getMessage();
                 $message->save();
-                abort(500, '推送发送失败：' . $syncError->getMessage() .
-                    '（若提示 Class Minishlink 不存在，请执行 composer require minishlink/web-push:^7.0）');
+                abort(500, '同步推送失败：' . $syncError->getMessage());
             }
         }
 
-        $message = $message->fresh() ?: $message;
+        try {
+            SendCustomWebPushJob::dispatch($message->id);
+        } catch (\Throwable $queueError) {
+            \Log::error('Web Push queue dispatch failed', [
+                'message_id' => $message->id,
+                'reason' => $queueError->getMessage(),
+            ]);
+            $message->status = 'failed';
+            $message->error_message = '入队失败：' . $queueError->getMessage();
+            $message->save();
+            abort(500, '推送入队失败：' . $queueError->getMessage() .
+                '。请检查 Redis（REDIS_CLIENT=phpredis）并运行 php artisan horizon');
+        }
 
         return response([
             'data' => $message,
             'meta' => [
-                'mode' => $usedSync ? 'sync' : 'queue',
+                'mode' => 'queue',
+                'hint' => '已入队 send_web_push，请确保 Horizon/队列进程在运行',
             ],
         ]);
     }

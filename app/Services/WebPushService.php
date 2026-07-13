@@ -302,20 +302,8 @@ class WebPushService
         }
 
         // Soft-signal webman to reload if present; do not fail the request.
-        try {
-            if (Cache::has('WEBMANPID')) {
-                $pid = Cache::get('WEBMANPID');
-                Cache::forget('WEBMANPID');
-                if (function_exists('posix_kill') && $pid) {
-                    @posix_kill((int)$pid, 15);
-                }
-            }
-        } catch (\Throwable $error) {
-            Log::warning('Web Push webman restart signal failed', [
-                'reason' => $error->getMessage(),
-            ]);
-        }
-
+        // IMPORTANT: never SIGTERM the webman master from an HTTP request — that causes 502.
+        // Operators should restart webman manually after bulk config changes if needed.
         return $this->getSettings();
     }
 

@@ -380,17 +380,48 @@ class WebPushService
     {
         $logo = trim((string)config('v2board.logo', ''));
         if ($logo !== '') {
-            return $logo;
+            return $this->absoluteAssetUrl($logo);
         }
 
-        $baseUrl = rtrim((string)config('v2board.app_url', config('app.url', '')), '/');
-        return $baseUrl . '/theme/blued/images/logo.png';
+        return $this->absoluteAssetUrl('/theme/blued/images/logo.png');
     }
 
     public function defaultClickUrl()
     {
         $baseUrl = rtrim((string)config('v2board.app_url', config('app.url', '')), '/');
         return $baseUrl . '/#/dashboard';
+    }
+
+    /**
+     * Browser notification icon/image must be absolute https URLs.
+     * Relative paths like /uploads/xxx never render as large images.
+     */
+    public function absoluteAssetUrl($url)
+    {
+        $url = trim((string)$url);
+        if ($url === '') {
+            return '';
+        }
+
+        if (preg_match('#^https?://#i', $url)) {
+            return $url;
+        }
+
+        $baseUrl = rtrim((string)config('v2board.app_url', config('app.url', '')), '/');
+        if ($baseUrl === '') {
+            return $url;
+        }
+
+        if (strpos($url, '//') === 0) {
+            $scheme = parse_url($baseUrl, PHP_URL_SCHEME) ?: 'https';
+            return $scheme . ':' . $url;
+        }
+
+        if ($url[0] !== '/') {
+            $url = '/' . $url;
+        }
+
+        return $baseUrl . $url;
     }
 
     private function resolveString(array $board, $key, $fallback)
@@ -516,17 +547,22 @@ class WebPushService
         }
 
         $body = trim((string)($input['body'] ?? ''));
-        $icon = trim((string)($input['icon'] ?? ''));
-        $image = trim((string)($input['image'] ?? ''));
+        $icon = $this->absoluteAssetUrl(trim((string)($input['icon'] ?? '')));
+        $image = $this->absoluteAssetUrl(trim((string)($input['image'] ?? '')));
         $url = trim((string)($input['url'] ?? ''));
         $tag = trim((string)($input['tag'] ?? ''));
-        $badge = trim((string)($input['badge'] ?? ''));
+        $badge = $this->absoluteAssetUrl(trim((string)($input['badge'] ?? '')));
 
         if ($icon === '') {
             $icon = $this->defaultIconUrl();
         }
         if ($badge === '') {
-            $badge = $this->defaultIconUrl();
+            $badge = $icon !== '' ? $icon : $this->defaultIconUrl();
+        }
+        // Large image: only send when valid absolute URL; browsers ignore relative paths.
+        if ($image === '' && $icon !== '' && $icon !== $this->defaultIconUrl()) {
+            // Prefer explicit image; if only a custom icon is set, reuse as image on capable clients.
+            $image = $icon;
         }
         if ($url === '') {
             $url = $this->defaultClickUrl();

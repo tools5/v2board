@@ -54,7 +54,6 @@ self.addEventListener('push', (event) => {
         body: payload.body || '',
         icon: payload.icon || '/theme/blued/images/logo.png',
         badge: payload.badge || payload.icon || '/theme/blued/images/logo.png',
-        image: payload.image || undefined,
         tag: payload.tag || 'website-notification',
         renotify: payload.renotify !== false,
         requireInteraction: !!payload.requireInteraction,
@@ -63,6 +62,11 @@ self.addEventListener('push', (event) => {
             actions: Array.isArray(payload.actions) ? payload.actions : [],
         },
     };
+
+    // Large image only when absolute http(s) URL — relative paths never show on desktop.
+    if (payload.image && /^https?:\/\//i.test(String(payload.image))) {
+        options.image = String(payload.image);
+    }
 
     if (actions.length > 0) {
         options.actions = actions;

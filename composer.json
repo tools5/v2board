@@ -12,6 +12,7 @@
     "license": "MIT",
     "require": {
         "php": "^7.3.0 || ^8.0",
+        "brick/math": "^0.9",
         "fideloper/proxy": "^4.4",
         "firebase/php-jwt": "^6.3@stable || ^7.0",
         "google/recaptcha": "^1.2",
@@ -20,12 +21,14 @@
         "laravel/horizon": "^5.9.6",
         "laravel/tinker": "^2.5",
         "linfo/linfo": "^4.0",
+        "minishlink/web-push": "^7.0",
         "paragonie/sodium_compat": "^1.20",
         "php-curl-class/php-curl-class": "^8.6",
         "predis/predis": "^3.5",
         "rybakit/msgpack": "^0.9.1",
         "stripe/stripe-php": "^v14.9.0",
-        "symfony/yaml": "^4.3"
+        "symfony/yaml": "^4.3",
+        "web-token/jwt-util-ecc": "^2.2"
     },
     "require-dev": {
         "facade/ignition": "^2.3.6",

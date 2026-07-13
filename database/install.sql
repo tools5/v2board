@@ -135,12 +135,31 @@ CREATE TABLE `v2_notice` (
                              `title` varchar(255) NOT NULL,
                              `content` text NOT NULL,
                              `show` tinyint(1) NOT NULL DEFAULT '0',
+                             `web_push_sent_at` int(11) DEFAULT NULL,
                              `img_url` varchar(255) DEFAULT NULL,
                              `tags` varchar(255) DEFAULT NULL,
                              `created_at` int(11) NOT NULL,
                              `updated_at` int(11) NOT NULL,
                              PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+
+DROP TABLE IF EXISTS `v2_web_push_subscription`;
+CREATE TABLE `v2_web_push_subscription` (
+                             `id` int(11) NOT NULL AUTO_INCREMENT,
+                             `user_id` int(11) unsigned NOT NULL,
+                             `endpoint_hash` char(64) NOT NULL,
+                             `endpoint` text NOT NULL,
+                             `public_key` varchar(255) NOT NULL,
+                             `auth_token` varchar(255) NOT NULL,
+                             `content_encoding` varchar(32) NOT NULL DEFAULT 'aes128gcm',
+                             `user_agent` varchar(500) DEFAULT NULL,
+                             `created_at` int(11) unsigned NOT NULL,
+                             `updated_at` int(11) unsigned NOT NULL,
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `v2_web_push_subscription_endpoint_hash_unique` (`endpoint_hash`),
+                             KEY `v2_web_push_subscription_user_id_index` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 DROP TABLE IF EXISTS `v2_order`;

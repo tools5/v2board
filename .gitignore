@@ -5,6 +5,7 @@
 /public/env.example.js
 /public/favicon.ico
 /storage/*.key
+/storage/app/webpush/cacert.pem
 /vendor
 .env
 .env.backup

@@ -4,9 +4,9 @@ namespace App\Http\Controllers\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\NoticeSave;
+use App\Jobs\SendNoticeWebPushJob;
 use App\Models\Notice;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 
 class NoticeController extends Controller
 {
@@ -26,12 +26,19 @@ class NoticeController extends Controller
             'tags'
         ]);
         if (!$request->input('id')) {
-            if (!Notice::create($data)) {
+            $notice = Notice::create($data);
+            if (!$notice) {
                 abort(500, '保存失败');
             }
+            $this->dispatchWebPushIfNeeded($notice);
         } else {
             try {
-                Notice::find($request->input('id'))->update($data);
+                $notice = Notice::find($request->input('id'));
+                if (!$notice) {
+                    abort(500, '公告不存在');
+                }
+                $notice->update($data);
+                $this->dispatchWebPushIfNeeded($notice->fresh());
             } catch (\Exception $e) {
                 abort(500, '保存失败');
             }
@@ -40,8 +47,6 @@ class NoticeController extends Controller
             'data' => true
         ]);
     }
-
-
 
     public function show(Request $request)
     {
@@ -57,10 +62,22 @@ class NoticeController extends Controller
             abort(500, '保存失败');
         }
 
+        $this->dispatchWebPushIfNeeded($notice);
+
         return response([
             'data' => true
         ]);
     }
+
+    private function dispatchWebPushIfNeeded(Notice $notice)
+    {
+        if (!$notice || !$notice->show || $notice->web_push_sent_at) {
+            return;
+        }
+
+        SendNoticeWebPushJob::dispatch($notice->id);
+    }
+
 
     public function drop(Request $request)
     {

@@ -50,6 +50,11 @@ class UserRoute
             $router->get ('/invite/details', 'V1\\User\\InviteController@details');
             // Notice
             $router->get ('/notice/fetch', 'V1\\User\\NoticeController@fetch');
+            // Web Push
+            $router->get ('/web-push/config', 'V1\\User\\WebPushController@config');
+            $router->get ('/web-push/status', 'V1\\User\\WebPushController@status');
+            $router->post('/web-push/subscribe', 'V1\\User\\WebPushController@subscribe');
+            $router->post('/web-push/unsubscribe', 'V1\\User\\WebPushController@unsubscribe');
             // Ticket
             $router->post('/ticket/reply', 'V1\\User\\TicketController@reply');
             $router->post('/ticket/close', 'V1\\User\\TicketController@close');

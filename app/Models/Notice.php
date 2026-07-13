@@ -12,6 +12,7 @@ class Notice extends Model
     protected $casts = [
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp',
+        'web_push_sent_at' => 'timestamp',
         'tags' => 'array'
     ];
 }

@@ -179,6 +179,7 @@ return [
                     'send_email',
                     'send_email_mass',
                     'send_telegram',
+                    'send_web_push',
                 ],
                 'balance' => 'auto',
                 'minProcesses' => 1,

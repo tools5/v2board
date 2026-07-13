@@ -169,6 +169,28 @@ return [
     */
 
     'environments' => [
+        'production' => [
+            'V2board' => [
+                'connection' => 'redis',
+                'queue' => [
+                    'order_handle',
+                    'traffic_fetch',
+                    'stat',
+                    'send_email',
+                    'send_email_mass',
+                    'send_telegram',
+                    'send_web_push',
+                ],
+                'balance' => 'auto',
+                'minProcesses' => 1,
+                'maxProcesses' => min(
+                    (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
+                    (int)env('HORIZON_MAX_PROCESSES', 128)
+                ),
+                'tries' => 1,
+                'balanceWait' => 3,
+            ],
+        ],
         'local' => [
             'V2board' => [
                 'connection' => 'redis',

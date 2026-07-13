@@ -827,6 +827,12 @@ class WebPushService
 
     public function createClient($batchSize = 500, array $payload = [])
     {
+        if (!class_exists(WebPush::class)) {
+            throw new \RuntimeException(
+                '缺少依赖 minishlink/web-push。请在服务器执行：composer require minishlink/web-push:^7.0 --no-dev -o'
+            );
+        }
+
         $settings = $this->getSettings();
         $clientOptions = [];
         $proxy = trim((string)$settings['proxy']);

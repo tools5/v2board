@@ -184,7 +184,15 @@ class WebPushController extends Controller
     public function send(Request $request)
     {
         if (!$this->webPushService->isConfigured()) {
-            abort(500, '浏览器推送尚未配置，请先在后台 Web Push 页面完成配置');
+            abort(500, '浏览器推送尚未配置，请先在后台 Web Push 页面完成配置并保存');
+        }
+
+        if (!\Schema::hasTable('v2_web_push_message')) {
+            abort(500, '缺少数据表 v2_web_push_message，请执行：php artisan migrate --force');
+        }
+
+        if (!\Schema::hasTable('v2_web_push_subscription')) {
+            abort(500, '缺少数据表 v2_web_push_subscription，请执行：php artisan migrate --force');
         }
 
         $title = trim((string)$request->input('title', ''));
@@ -239,31 +247,62 @@ class WebPushController extends Controller
             abort(500, $error->getMessage());
         }
 
-        $message = WebPushMessage::create([
-            'title' => $payload['title'],
-            'body' => $payload['body'],
-            'icon' => $payload['icon'],
-            'image' => $payload['image'],
-            'url' => $payload['url'],
-            'tag' => $payload['tag'],
-            'actions' => $payload['actions'],
-            'target_type' => $targetType,
-            'target_user_id' => $targetType === 'user' ? (int)$targetUserId : null,
-            'target_filter' => $targetFilter,
-            'admin_id' => $request->user['id'] ?? null,
-            'status' => 'queued',
-        ]);
-
-        $sync = (bool)$request->input('sync', false);
-        if ($sync) {
-            SendCustomWebPushJob::dispatchNow($message->id);
-            $message = $message->fresh();
-        } else {
-            SendCustomWebPushJob::dispatch($message->id);
+        try {
+            $message = WebPushMessage::create([
+                'title' => $payload['title'],
+                'body' => $payload['body'],
+                'icon' => $payload['icon'],
+                'image' => $payload['image'],
+                'url' => $payload['url'],
+                'tag' => $payload['tag'],
+                'actions' => $payload['actions'],
+                'target_type' => $targetType,
+                'target_user_id' => $targetType === 'user' ? (int)$targetUserId : null,
+                'target_filter' => $targetFilter,
+                'admin_id' => $request->user['id'] ?? null,
+                'status' => 'queued',
+            ]);
+        } catch (\Throwable $error) {
+            \Log::error('Web Push message create failed', [
+                'message' => $error->getMessage(),
+            ]);
+            abort(500, '写入推送记录失败：' . $error->getMessage());
         }
+
+        // Default to queue; fall back to sync when Redis/Horizon is unavailable.
+        $forceSync = (bool)$request->input('sync', false);
+        $usedSync = $forceSync;
+
+        try {
+            if ($forceSync) {
+                SendCustomWebPushJob::dispatchNow($message->id);
+            } else {
+                SendCustomWebPushJob::dispatch($message->id);
+            }
+        } catch (\Throwable $queueError) {
+            \Log::warning('Web Push queue dispatch failed, falling back to sync', [
+                'message_id' => $message->id,
+                'reason' => $queueError->getMessage(),
+            ]);
+            try {
+                SendCustomWebPushJob::dispatchNow($message->id);
+                $usedSync = true;
+            } catch (\Throwable $syncError) {
+                $message->status = 'failed';
+                $message->error_message = $syncError->getMessage();
+                $message->save();
+                abort(500, '推送发送失败：' . $syncError->getMessage() .
+                    '（若提示 Class Minishlink 不存在，请执行 composer require minishlink/web-push:^7.0）');
+            }
+        }
+
+        $message = $message->fresh() ?: $message;
 
         return response([
             'data' => $message,
+            'meta' => [
+                'mode' => $usedSync ? 'sync' : 'queue',
+            ],
         ]);
     }
 
@@ -293,27 +332,43 @@ class WebPushController extends Controller
             abort(500, $error->getMessage());
         }
 
-        $stats = $this->webPushService->sendToUserIds([$userId], $payload);
+        try {
+            $stats = $this->webPushService->sendToUserIds([$userId], $payload);
+        } catch (\Throwable $error) {
+            abort(500, '测试推送失败：' . $error->getMessage() .
+                '（若提示 Class Minishlink 不存在，请执行 composer require minishlink/web-push:^7.0）');
+        }
 
-        $message = WebPushMessage::create([
-            'title' => $payload['title'],
-            'body' => $payload['body'],
-            'icon' => $payload['icon'],
-            'image' => $payload['image'],
-            'url' => $payload['url'],
-            'tag' => $payload['tag'],
-            'actions' => $payload['actions'],
-            'target_type' => 'user',
-            'target_user_id' => $userId,
-            'target_filter' => ['type' => 'user', 'user_id' => $userId],
-            'admin_id' => $request->user['id'] ?? null,
-            'status' => ($stats['sent'] > 0 || $stats['total'] === 0) ? 'sent' : 'failed',
-            'total' => $stats['total'],
-            'sent' => $stats['sent'],
-            'failed' => $stats['failed'],
-            'expired' => $stats['expired'],
-            'error_message' => $stats['total'] === 0 ? '该用户没有有效订阅设备' : null,
-        ]);
+        try {
+            $message = WebPushMessage::create([
+                'title' => $payload['title'],
+                'body' => $payload['body'],
+                'icon' => $payload['icon'],
+                'image' => $payload['image'],
+                'url' => $payload['url'],
+                'tag' => $payload['tag'],
+                'actions' => $payload['actions'],
+                'target_type' => 'user',
+                'target_user_id' => $userId,
+                'target_filter' => ['type' => 'user', 'user_id' => $userId],
+                'admin_id' => $request->user['id'] ?? null,
+                'status' => ($stats['sent'] > 0 || $stats['total'] === 0) ? 'sent' : 'failed',
+                'total' => $stats['total'],
+                'sent' => $stats['sent'],
+                'failed' => $stats['failed'],
+                'expired' => $stats['expired'],
+                'error_message' => $stats['total'] === 0 ? '该用户没有有效订阅设备' : null,
+            ]);
+        } catch (\Throwable $error) {
+            // Sending already happened; do not fail the whole request on history write.
+            return response([
+                'data' => [
+                    'message' => null,
+                    'stats' => $stats,
+                    'warning' => '推送已尝试，但写入记录失败：' . $error->getMessage(),
+                ],
+            ]);
+        }
 
         return response([
             'data' => [

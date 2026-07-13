@@ -41,6 +41,8 @@ class Kernel extends ConsoleKernel
         $schedule->command('reset:log')->daily();
         // send
         $schedule->command('send:remindMail')->dailyAt('11:30');
+        // browser push: plan expire / traffic warn
+        $schedule->command('send:remindWebPush')->dailyAt('11:40')->withoutOverlapping();
         // horizon metrics
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
     }

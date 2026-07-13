@@ -35,14 +35,16 @@ class WebPushReminderService
             return $stats;
         }
 
-        if ((bool)config('webpush.remind.expire_enabled', true)) {
-            $expireStats = $this->processExpireReminders($forceIgnoreCache);
+        $settings = $this->webPushService->getSettings();
+
+        if (!empty($settings['remind_expire'])) {
+            $expireStats = $this->processExpireReminders($forceIgnoreCache, $settings);
             $stats['expire_checked'] = $expireStats['checked'];
             $stats['expire_sent_users'] = $expireStats['sent_users'];
         }
 
-        if ((bool)config('webpush.remind.traffic_enabled', true)) {
-            $trafficStats = $this->processTrafficReminders($forceIgnoreCache);
+        if (!empty($settings['remind_traffic'])) {
+            $trafficStats = $this->processTrafficReminders($forceIgnoreCache, $settings);
             $stats['traffic_checked'] = $trafficStats['checked'];
             $stats['traffic_sent_users'] = $trafficStats['sent_users'];
         }
@@ -50,10 +52,13 @@ class WebPushReminderService
         return $stats;
     }
 
-    public function processExpireReminders($forceIgnoreCache = false)
+    public function processExpireReminders($forceIgnoreCache = false, array $settings = null)
     {
         $stats = ['checked' => 0, 'sent_users' => 0];
-        $expireDays = config('webpush.remind.expire_days', [3, 1, 0]);
+        if ($settings === null) {
+            $settings = $this->webPushService->getSettings();
+        }
+        $expireDays = $settings['remind_expire_days_list'] ?? [3, 1, 0];
         if (!is_array($expireDays) || empty($expireDays)) {
             $expireDays = [3, 1, 0];
         }
@@ -91,7 +96,7 @@ class WebPushReminderService
                 continue;
             }
 
-            $payload = $this->buildExpirePayload($user, $remainingDays);
+            $payload = $this->buildExpirePayload($user, $remainingDays, $settings);
             $sendStats = $this->webPushService->sendToUserIds([(int)$user->id], $payload);
             if (($sendStats['sent'] ?? 0) > 0) {
                 // 同一剩余天数只提醒一次，缓存略大于 1 天避免跨日重复
@@ -112,15 +117,18 @@ class WebPushReminderService
         return $stats;
     }
 
-    public function processTrafficReminders($forceIgnoreCache = false)
+    public function processTrafficReminders($forceIgnoreCache = false, array $settings = null)
     {
         $stats = ['checked' => 0, 'sent_users' => 0];
+        if ($settings === null) {
+            $settings = $this->webPushService->getSettings();
+        }
         $userIds = $this->subscribedUserIds();
         if (empty($userIds)) {
             return $stats;
         }
 
-        $threshold = (float)config('webpush.remind.traffic_percent', 95);
+        $threshold = (float)($settings['remind_traffic_percent'] ?? 95);
         $now = time();
 
         $users = User::query()
@@ -145,7 +153,7 @@ class WebPushReminderService
                 continue;
             }
 
-            $payload = $this->buildTrafficPayload($user, $threshold);
+            $payload = $this->buildTrafficPayload($user, $threshold, $settings);
             $sendStats = $this->webPushService->sendToUserIds([(int)$user->id], $payload);
             if (($sendStats['sent'] ?? 0) > 0) {
                 Cache::put($cacheKey, 1, 24 * 3600);
@@ -189,13 +197,13 @@ class WebPushReminderService
         return $percentage >= $thresholdPercent && $percentage < 100;
     }
 
-    private function buildExpirePayload(User $user, $remainingDays)
+    private function buildExpirePayload(User $user, $remainingDays, array $settings = [])
     {
         $appName = (string)config('v2board.app_name', 'V2Board');
         $expireText = date('Y-m-d H:i', (int)$user->expired_at);
-        $url = trim((string)config('webpush.remind.expire_url', ''));
+        $url = trim((string)($settings['remind_expire_url'] ?? ''));
         if ($url === '') {
-            $url = rtrim((string)config('app.url', config('v2board.app_url', '')), '/') . '/#/plan';
+            $url = rtrim((string)config('v2board.app_url', config('app.url', '')), '/') . '/#/plan';
         }
 
         if ((int)$remainingDays <= 0) {
@@ -219,15 +227,15 @@ class WebPushReminderService
         ]);
     }
 
-    private function buildTrafficPayload(User $user, $thresholdPercent)
+    private function buildTrafficPayload(User $user, $thresholdPercent, array $settings = [])
     {
         $appName = (string)config('v2board.app_name', 'V2Board');
         $used = (float)$user->u + (float)$user->d;
         $enable = max(1, (float)$user->transfer_enable);
         $percent = min(99, (int)floor(($used / $enable) * 100));
-        $url = trim((string)config('webpush.remind.traffic_url', ''));
+        $url = trim((string)($settings['remind_traffic_url'] ?? ''));
         if ($url === '') {
-            $url = rtrim((string)config('app.url', config('v2board.app_url', '')), '/') . '/#/plan';
+            $url = rtrim((string)config('v2board.app_url', config('app.url', '')), '/') . '/#/plan';
         }
 
         return $this->webPushService->normalizePayload([

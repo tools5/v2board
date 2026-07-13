@@ -22,18 +22,89 @@ class WebPushController extends Controller
 
     public function overview()
     {
+        $settings = $this->webPushService->getSettings();
+
         return response([
             'data' => [
                 'configured' => $this->webPushService->isConfigured(),
-                'enabled' => (bool)config('webpush.enabled'),
-                'public_key' => (string)config('webpush.vapid.public_key', ''),
+                'enabled' => (bool)$settings['enabled'],
+                'public_key' => (string)$settings['public_key'],
                 'subscription_count' => WebPushSubscription::count(),
                 'user_count' => WebPushSubscription::distinct('user_id')->count('user_id'),
                 'message_count' => WebPushMessage::count(),
                 'default_icon' => $this->webPushService->defaultIconUrl(),
                 'default_url' => $this->webPushService->defaultClickUrl(),
                 'plans' => Plan::orderBy('sort', 'ASC')->get(['id', 'name']),
+                'settings' => [
+                    'enabled' => (bool)$settings['enabled'],
+                    'vapid_subject' => (string)$settings['vapid_subject'],
+                    'public_key' => (string)$settings['public_key'],
+                    // Never expose private key fully in list views; still needed for edit form.
+                    'private_key' => (string)$settings['private_key'],
+                    'ttl' => (int)$settings['ttl'],
+                    'urgency' => (string)$settings['urgency'],
+                    'batch_size' => (int)$settings['batch_size'],
+                    'request_timeout' => (int)$settings['request_timeout'],
+                    'proxy' => (string)$settings['proxy'],
+                    'ca_bundle' => (string)$settings['ca_bundle'],
+                    'remind_expire' => (bool)$settings['remind_expire'],
+                    'remind_traffic' => (bool)$settings['remind_traffic'],
+                    'remind_expire_days' => (string)$settings['remind_expire_days'],
+                    'remind_traffic_percent' => (int)$settings['remind_traffic_percent'],
+                    'remind_expire_url' => (string)$settings['remind_expire_url'],
+                    'remind_traffic_url' => (string)$settings['remind_traffic_url'],
+                    'source' => (string)$settings['source'],
+                ],
             ],
+        ]);
+    }
+
+    public function saveSettings(Request $request)
+    {
+        try {
+            $settings = $this->webPushService->saveSettings($request->all());
+        } catch (\InvalidArgumentException $error) {
+            abort(500, $error->getMessage());
+        } catch (\RuntimeException $error) {
+            abort(500, $error->getMessage());
+        }
+
+        return response([
+            'data' => [
+                'configured' => $this->webPushService->isConfigured(),
+                'settings' => [
+                    'enabled' => (bool)$settings['enabled'],
+                    'vapid_subject' => (string)$settings['vapid_subject'],
+                    'public_key' => (string)$settings['public_key'],
+                    'private_key' => (string)$settings['private_key'],
+                    'ttl' => (int)$settings['ttl'],
+                    'urgency' => (string)$settings['urgency'],
+                    'batch_size' => (int)$settings['batch_size'],
+                    'request_timeout' => (int)$settings['request_timeout'],
+                    'proxy' => (string)$settings['proxy'],
+                    'ca_bundle' => (string)$settings['ca_bundle'],
+                    'remind_expire' => (bool)$settings['remind_expire'],
+                    'remind_traffic' => (bool)$settings['remind_traffic'],
+                    'remind_expire_days' => (string)$settings['remind_expire_days'],
+                    'remind_traffic_percent' => (int)$settings['remind_traffic_percent'],
+                    'remind_expire_url' => (string)$settings['remind_expire_url'],
+                    'remind_traffic_url' => (string)$settings['remind_traffic_url'],
+                    'source' => (string)$settings['source'],
+                ],
+            ],
+        ]);
+    }
+
+    public function generateKeys()
+    {
+        try {
+            $keys = $this->webPushService->generateVapidKeys();
+        } catch (\RuntimeException $error) {
+            abort(500, $error->getMessage());
+        }
+
+        return response([
+            'data' => $keys,
         ]);
     }
 
@@ -106,7 +177,7 @@ class WebPushController extends Controller
     public function send(Request $request)
     {
         if (!$this->webPushService->isConfigured()) {
-            abort(500, '浏览器推送尚未配置，请先设置 WEB_PUSH_* 环境变量');
+            abort(500, '浏览器推送尚未配置，请先在后台 Web Push 页面完成配置');
         }
 
         $title = trim((string)$request->input('title', ''));

@@ -3,44 +3,56 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Minishlink\WebPush\VAPID;
 
 class GenerateWebPushVapidKeys extends Command
 {
-    protected $signature = 'webpush:vapid {--force : Replace existing VAPID keys}';
-    protected $description = 'Generate Web Push VAPID keys and store them in .env';
+    protected $signature = 'webpush:vapid {--force : Replace existing VAPID keys} {--env : Also write keys into .env as fallback}';
+    protected $description = 'Generate Web Push VAPID keys and save them to admin config (config/v2board.php)';
 
     public function handle()
     {
-        $envPath = base_path('.env');
-        if (!is_file($envPath)) {
-            $this->error('.env 文件不存在');
-            return 1;
-        }
+        /** @var \App\Services\WebPushService $webPushService */
+        $webPushService = app(\App\Services\WebPushService::class);
+        $current = $webPushService->getSettings();
 
         if (!$this->option('force')
-            && config('webpush.vapid.public_key')
-            && config('webpush.vapid.private_key')
+            && !empty($current['public_key'])
+            && !empty($current['private_key'])
         ) {
             $this->info('VAPID 密钥已存在，未做修改。使用 --force 可重新生成。');
             return 0;
         }
 
-        $keys = VAPID::createVapidKeys();
-        $subject = $this->resolveVapidSubject();
+        try {
+            $keys = $webPushService->generateVapidKeys();
+            $settings = $webPushService->saveSettings([
+                'enabled' => true,
+                'vapid_subject' => $keys['vapid_subject'] ?: $this->resolveVapidSubject(),
+                'public_key' => $keys['public_key'],
+                'private_key' => $keys['private_key'],
+            ]);
+        } catch (\Throwable $error) {
+            $this->error($error->getMessage());
+            return 1;
+        }
 
-        $content = file_get_contents($envPath);
-        $content = $this->setEnvValue($content, 'WEB_PUSH_ENABLED', 'true');
-        $content = $this->setEnvValue($content, 'WEB_PUSH_VAPID_SUBJECT', $subject);
-        $content = $this->setEnvValue($content, 'WEB_PUSH_PUBLIC_KEY', $keys['publicKey']);
-        $content = $this->setEnvValue($content, 'WEB_PUSH_PRIVATE_KEY', $keys['privateKey']);
+        if ($this->option('env')) {
+            $envPath = base_path('.env');
+            if (is_file($envPath)) {
+                $content = file_get_contents($envPath);
+                $content = $this->setEnvValue($content, 'WEB_PUSH_ENABLED', 'true');
+                $content = $this->setEnvValue($content, 'WEB_PUSH_VAPID_SUBJECT', $settings['vapid_subject']);
+                $content = $this->setEnvValue($content, 'WEB_PUSH_PUBLIC_KEY', $settings['public_key']);
+                $content = $this->setEnvValue($content, 'WEB_PUSH_PRIVATE_KEY', $settings['private_key']);
+                file_put_contents($envPath, $content);
+                $this->info('已同步写入 .env 作为回退配置。');
+            }
+        }
 
-        file_put_contents($envPath, $content);
-        $this->call('config:clear');
-        $this->info('Web Push VAPID 密钥已生成并写入 .env。');
-        $this->line('WEB_PUSH_VAPID_SUBJECT=' . $subject);
-        $this->line('WEB_PUSH_PUBLIC_KEY=' . $keys['publicKey']);
-        $this->warn('生产环境请确保 APP_URL 为 https:// 域名，或将 WEB_PUSH_VAPID_SUBJECT 设为 mailto:你的邮箱。');
+        $this->info('Web Push VAPID 密钥已生成并写入后台配置（config/v2board.php）。');
+        $this->line('WEB_PUSH_VAPID_SUBJECT=' . $settings['vapid_subject']);
+        $this->line('WEB_PUSH_PUBLIC_KEY=' . $settings['public_key']);
+        $this->warn('也可在后台「Web Push 管理」页面直接配置，无需改 .env。');
         return 0;
     }
 

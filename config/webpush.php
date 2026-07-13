@@ -1,5 +1,15 @@
 <?php
 
+/*
+|--------------------------------------------------------------------------
+| Web Push defaults (env fallback)
+|--------------------------------------------------------------------------
+|
+| Admin panel "Web Push" settings are saved into config/v2board.php.
+| Runtime prefers admin values; falls back to this file / .env when unset.
+|
+*/
+
 $vapidSubject = (string)env('WEB_PUSH_VAPID_SUBJECT', env('APP_URL', ''));
 if (!preg_match('/^(https:\/\/|mailto:)/i', $vapidSubject)) {
     $mailFromAddress = (string)env('MAIL_FROM_ADDRESS', '');
@@ -21,11 +31,6 @@ return [
     'request_timeout' => (int)env('WEB_PUSH_REQUEST_TIMEOUT', 30),
     'proxy' => env('WEB_PUSH_PROXY'),
     'ca_bundle' => env('WEB_PUSH_CA_BUNDLE'),
-    /*
-    | 自动业务提醒
-    | expire_days: 剩余天数命中列表时推送（例如 3 天、1 天各推一次）
-    | traffic_percent: 流量使用达到该百分比时推送（默认 95）
-    */
     'remind' => [
         'expire_enabled' => (bool)env('WEB_PUSH_REMIND_EXPIRE', true),
         'traffic_enabled' => (bool)env('WEB_PUSH_REMIND_TRAFFIC', true),

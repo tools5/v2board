@@ -18,7 +18,7 @@ class WebPushController extends Controller
 
     public function config()
     {
-        $publicKey = (string)config('webpush.vapid.public_key', '');
+        $publicKey = (string)$this->webPushService->getSettings()['public_key'];
 
         return response([
             'data' => [

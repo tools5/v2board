@@ -27,7 +27,7 @@ class AuthService
             'session' => $guid,
         ], config('app.key'), 'HS256');
         self::addSession($this->user->id, $guid, [
-            'ip' => $request->ip(),
+            'ip' => Helper::getRealClientIp($request),
             'login_at' => time(),
             'ua' => $request->userAgent(),
             'auth_data' => $authData

@@ -12,7 +12,9 @@ class TrustProxies extends Middleware
      *
      * @var array|string
      */
-    protected $proxies;
+    // 信任反向代理（Nginx / Caddy / Cloudflare / 本地反代），
+    // 否则 $request->ip() 在本地会一直是 127.0.0.1
+    protected $proxies = '*';
 
     /**
      * The headers that should be used to detect proxies.

@@ -196,6 +196,66 @@ class Helper
         return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? "[$host]" : $host;
     }
 
+    /**
+     * 获取真实客户端 IP。
+     * 优先读取常见反代头（CF / X-Real-IP / X-Forwarded-For），
+     * 避免本地或反代环境下 $request->ip() 只拿到 127.0.0.1。
+     *
+     * @param \Illuminate\Http\Request|null $request
+     * @return string
+     */
+    public static function getRealClientIp($request = null)
+    {
+        $request = $request ?: request();
+
+        $headerCandidates = [
+            'CF-Connecting-IP',
+            'True-Client-IP',
+            'X-Real-IP',
+            'X-Client-IP',
+            'X-Forwarded-For',
+        ];
+
+        foreach ($headerCandidates as $headerName) {
+            $headerValue = $request->headers->get($headerName);
+            if (!$headerValue) {
+                continue;
+            }
+
+            // X-Forwarded-For 可能是 "client, proxy1, proxy2"
+            $ipParts = explode(',', $headerValue);
+            $candidateIp = trim($ipParts[0]);
+            if (self::isValidPublicOrPrivateIp($candidateIp)) {
+                return $candidateIp;
+            }
+        }
+
+        $fallbackIp = $request->ip();
+        if ($fallbackIp && self::isValidPublicOrPrivateIp($fallbackIp)) {
+            return $fallbackIp;
+        }
+
+        $remoteAddr = $request->server('REMOTE_ADDR');
+        if ($remoteAddr && self::isValidPublicOrPrivateIp($remoteAddr)) {
+            return $remoteAddr;
+        }
+
+        return $fallbackIp ?: '0.0.0.0';
+    }
+
+    /**
+     * @param string $ip
+     * @return bool
+     */
+    private static function isValidPublicOrPrivateIp($ip)
+    {
+        return (bool) filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6
+        );
+    }
+
     public static function buildShadowsocksUri($uuid, $server)
     {
         $cipher = $server['cipher'];

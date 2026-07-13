@@ -181,6 +181,20 @@ class WebPushController extends Controller
         ]);
     }
 
+    public function clearMessages()
+    {
+        if (!\Schema::hasTable('v2_web_push_message')) {
+            abort(500, '缺少数据表 v2_web_push_message');
+        }
+
+        $deleted = WebPushMessage::query()->delete();
+
+        return response([
+            'data' => true,
+            'deleted' => (int)$deleted,
+        ]);
+    }
+
     public function send(Request $request)
     {
         if (!$this->webPushService->isConfigured()) {

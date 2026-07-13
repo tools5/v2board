@@ -151,6 +151,7 @@ class AdminRoute
             $router->get ('/web-push/subscriptions', 'V1\\Admin\\WebPushController@subscriptions');
             $router->post('/web-push/dropSubscription', 'V1\\Admin\\WebPushController@dropSubscription');
             $router->get ('/web-push/messages', 'V1\\Admin\\WebPushController@messages');
+            $router->post('/web-push/clearMessages', 'V1\\Admin\\WebPushController@clearMessages');
             $router->post('/web-push/send', 'V1\\Admin\\WebPushController@send');
             $router->post('/web-push/test', 'V1\\Admin\\WebPushController@test');
             // Ticket

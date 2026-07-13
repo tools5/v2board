@@ -6,7 +6,7 @@ use Illuminate\Console\Command;
 
 class GenerateWebPushVapidKeys extends Command
 {
-    protected $signature = 'webpush:vapid {--force : Replace existing VAPID keys} {--env : Also write keys into .env as fallback}';
+    protected $signature = 'webpush:vapid {--force : Replace existing VAPID keys} {--write-env : Also write keys into .env as fallback}';
     protected $description = 'Generate Web Push VAPID keys and save them to admin config (config/v2board.php)';
 
     public function handle()
@@ -36,7 +36,8 @@ class GenerateWebPushVapidKeys extends Command
             return 1;
         }
 
-        if ($this->option('env')) {
+        // Note: cannot use --env (Laravel reserves it for application environment).
+        if ($this->option('write-env')) {
             $envPath = base_path('.env');
             if (is_file($envPath)) {
                 $content = file_get_contents($envPath);

@@ -303,19 +303,68 @@ class WebPushService
      */
     public function generateVapidKeys()
     {
-        try {
-            $keys = VAPID::createVapidKeys();
-        } catch (\Throwable $error) {
-            throw new \RuntimeException('生成 VAPID 密钥失败：' . $error->getMessage());
+        $subject = $this->normalizeVapidSubject(
+            (string)config('v2board.app_url', config('app.url', ''))
+        );
+
+        if (class_exists(VAPID::class)) {
+            try {
+                $keys = VAPID::createVapidKeys();
+                return [
+                    'public_key' => (string)($keys['publicKey'] ?? ''),
+                    'private_key' => (string)($keys['privateKey'] ?? ''),
+                    'vapid_subject' => $subject,
+                ];
+            } catch (\Throwable $error) {
+                // Fall through to OpenSSL generator below.
+                Log::warning('VAPID library key generation failed, falling back to OpenSSL', [
+                    'reason' => $error->getMessage(),
+                ]);
+            }
         }
 
+        return $this->generateVapidKeysWithOpenSsl($subject);
+    }
+
+    /**
+     * Generate VAPID keys using OpenSSL when minishlink/web-push is unavailable.
+     */
+    private function generateVapidKeysWithOpenSsl($subject)
+    {
+        if (!function_exists('openssl_pkey_new')) {
+            throw new \RuntimeException(
+                '缺少 minishlink/web-push 且 OpenSSL 不可用。请在服务器执行：composer require minishlink/web-push:^7.0'
+            );
+        }
+
+        $privateKeyResource = openssl_pkey_new([
+            'curve_name' => 'prime256v1',
+            'private_key_type' => OPENSSL_KEYTYPE_EC,
+        ]);
+        if ($privateKeyResource === false) {
+            throw new \RuntimeException(
+                'OpenSSL 无法生成 EC 密钥。请安装扩展后执行：composer require minishlink/web-push:^7.0'
+            );
+        }
+
+        $details = openssl_pkey_get_details($privateKeyResource);
+        if (!is_array($details) || empty($details['ec']['x']) || empty($details['ec']['y']) || empty($details['ec']['d'])) {
+            throw new \RuntimeException('OpenSSL 密钥详情读取失败，请安装 minishlink/web-push');
+        }
+
+        $publicRaw = "\x04" . $details['ec']['x'] . $details['ec']['y'];
+        $privateRaw = $details['ec']['d'];
+
         return [
-            'public_key' => (string)($keys['publicKey'] ?? ''),
-            'private_key' => (string)($keys['privateKey'] ?? ''),
-            'vapid_subject' => $this->normalizeVapidSubject(
-                (string)config('v2board.app_url', config('app.url', ''))
-            ),
+            'public_key' => $this->base64UrlEncode($publicRaw),
+            'private_key' => $this->base64UrlEncode($privateRaw),
+            'vapid_subject' => $subject,
         ];
+    }
+
+    private function base64UrlEncode($binary)
+    {
+        return rtrim(strtr(base64_encode($binary), '+/', '-_'), '=');
     }
 
     public function defaultIconUrl()

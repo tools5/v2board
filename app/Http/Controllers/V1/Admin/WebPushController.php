@@ -67,6 +67,13 @@ class WebPushController extends Controller
             abort(500, $error->getMessage());
         } catch (\RuntimeException $error) {
             abort(500, $error->getMessage());
+        } catch (\Throwable $error) {
+            \Log::error('Web Push saveSettings failed', [
+                'message' => $error->getMessage(),
+                'file' => $error->getFile(),
+                'line' => $error->getLine(),
+            ]);
+            abort(500, '保存失败：' . $error->getMessage());
         }
 
         return response([

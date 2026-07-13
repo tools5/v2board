@@ -263,36 +263,57 @@ class WebPushService
         $config['web_push_remind_expire_url'] = $expireUrl !== '' ? $expireUrl : null;
         $config['web_push_remind_traffic_url'] = $trafficUrl !== '' ? $trafficUrl : null;
 
+        $configPath = base_path('config/v2board.php');
         $exported = var_export($config, true);
-        if (!File::put(base_path() . '/config/v2board.php', "<?php\n return $exported ;", true)) {
-            throw new \RuntimeException('写入配置文件失败，请检查 config/v2board.php 权限');
+        $phpContent = "<?php\n return $exported ;";
+
+        // Prefer direct write so we can surface permission errors clearly.
+        $bytesWritten = @file_put_contents($configPath, $phpContent, LOCK_EX);
+        if ($bytesWritten === false) {
+            $ownerHint = '';
+            if (function_exists('posix_getpwuid') && is_file($configPath)) {
+                $owner = @posix_getpwuid(@fileowner($configPath));
+                if (is_array($owner) && !empty($owner['name'])) {
+                    $ownerHint = ' 当前文件所有者: ' . $owner['name'] . '。';
+                }
+            }
+            throw new \RuntimeException(
+                '写入 config/v2board.php 失败，请检查权限（通常需 www 可写）。' . $ownerHint .
+                ' 可执行: chown www:www config/v2board.php && chmod 664 config/v2board.php'
+            );
         }
 
         if (function_exists('opcache_reset')) {
             @opcache_reset();
         }
 
-        try {
-            Artisan::call('config:cache');
-        } catch (\Throwable $error) {
-            // Some environments (missing predis etc.) may fail config:cache; still refresh runtime.
-            Artisan::call('config:clear');
-            Log::warning('Web Push config:cache failed, fell back to config:clear', [
-                'reason' => $error->getMessage(),
-            ]);
-        }
-
-        // Refresh in-memory config for current request.
+        // Refresh runtime config first; never let cache rebuild fail the save.
         config([
             'v2board' => $config,
         ]);
 
-        if (Cache::has('WEBMANPID')) {
-            $pid = Cache::get('WEBMANPID');
-            Cache::forget('WEBMANPID');
-            if (function_exists('posix_kill') && $pid) {
-                @posix_kill((int)$pid, 15);
+        try {
+            // Prefer clear over cache: config:cache needs full env and may fail on Redis/predis.
+            Artisan::call('config:clear');
+        } catch (\Throwable $error) {
+            Log::warning('Web Push config:clear failed after save', [
+                'reason' => $error->getMessage(),
+            ]);
+        }
+
+        // Soft-signal webman to reload if present; do not fail the request.
+        try {
+            if (Cache::has('WEBMANPID')) {
+                $pid = Cache::get('WEBMANPID');
+                Cache::forget('WEBMANPID');
+                if (function_exists('posix_kill') && $pid) {
+                    @posix_kill((int)$pid, 15);
+                }
             }
+        } catch (\Throwable $error) {
+            Log::warning('Web Push webman restart signal failed', [
+                'reason' => $error->getMessage(),
+            ]);
         }
 
         return $this->getSettings();

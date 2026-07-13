@@ -86,6 +86,76 @@ class AuthService
         return (array)Cache::get(CacheKey::get("USER_SESSIONS", $this->user->id), []);
     }
 
+    /**
+     * 读取会话列表时，把当前 JWT 对应会话的 IP/UA 刷新为本次请求的真实值。
+     * 解决：旧会话仍是 127.0.0.1，以及「记住登录/继续」未重新 login 导致 IP 不更新。
+     */
+    public function getSessionsAndRefreshCurrent(Request $request)
+    {
+        $cacheKey = CacheKey::get("USER_SESSIONS", $this->user->id);
+        $sessions = (array)Cache::get($cacheKey, []);
+        if (empty($sessions)) {
+            return $sessions;
+        }
+
+        $authorization = $request->input('auth_data') ?? $request->header('authorization');
+        if (!$authorization) {
+            return $sessions;
+        }
+
+        $currentSessionId = null;
+        foreach ($sessions as $sessionId => $sessionMeta) {
+            if (!is_array($sessionMeta)) {
+                continue;
+            }
+            if (!empty($sessionMeta['auth_data']) && $sessionMeta['auth_data'] === $authorization) {
+                $currentSessionId = $sessionId;
+                break;
+            }
+        }
+
+        // 兼容：缓存里 meta 没有 auth_data 时，从 JWT payload 解析 session
+        if ($currentSessionId === null) {
+            try {
+                $payload = (array)JWT::decode($authorization, new Key(config('app.key'), 'HS256'));
+                if (!empty($payload['session']) && isset($sessions[$payload['session']])) {
+                    $currentSessionId = $payload['session'];
+                }
+            } catch (\Exception $exception) {
+                // ignore
+            }
+        }
+
+        if ($currentSessionId === null || !isset($sessions[$currentSessionId]) || !is_array($sessions[$currentSessionId])) {
+            return $sessions;
+        }
+
+        $realClientIp = Helper::getRealClientIp($request);
+        $userAgent = $request->userAgent();
+        $sessionMeta = $sessions[$currentSessionId];
+        $shouldPersist = false;
+
+        if ($realClientIp && (!isset($sessionMeta['ip']) || $sessionMeta['ip'] !== $realClientIp)) {
+            $sessionMeta['ip'] = $realClientIp;
+            $shouldPersist = true;
+        }
+        if ($userAgent && empty($sessionMeta['ua'])) {
+            $sessionMeta['ua'] = $userAgent;
+            $shouldPersist = true;
+        }
+        if (empty($sessionMeta['auth_data'])) {
+            $sessionMeta['auth_data'] = $authorization;
+            $shouldPersist = true;
+        }
+
+        if ($shouldPersist) {
+            $sessions[$currentSessionId] = $sessionMeta;
+            Cache::put($cacheKey, $sessions);
+        }
+
+        return $sessions;
+    }
+
     public function removeSession($sessionId)
     {
         $cacheKey = CacheKey::get("USER_SESSIONS", $this->user->id);

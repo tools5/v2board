@@ -34,7 +34,7 @@ class UserController extends Controller
         }
         $authService = new AuthService($user);
         return response([
-            'data' => $authService->getSessions()
+            'data' => $authService->getSessionsAndRefreshCurrent($request)
         ]);
     }
 

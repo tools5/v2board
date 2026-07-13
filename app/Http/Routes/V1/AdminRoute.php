@@ -144,6 +144,13 @@ class AdminRoute
             $router->post('/notice/update', 'V1\\Admin\\NoticeController@update');
             $router->post('/notice/drop', 'V1\\Admin\\NoticeController@drop');
             $router->post('/notice/show', 'V1\\Admin\\NoticeController@show');
+            // Web Push 管理
+            $router->get ('/web-push/overview', 'V1\\Admin\\WebPushController@overview');
+            $router->get ('/web-push/subscriptions', 'V1\\Admin\\WebPushController@subscriptions');
+            $router->post('/web-push/dropSubscription', 'V1\\Admin\\WebPushController@dropSubscription');
+            $router->get ('/web-push/messages', 'V1\\Admin\\WebPushController@messages');
+            $router->post('/web-push/send', 'V1\\Admin\\WebPushController@send');
+            $router->post('/web-push/test', 'V1\\Admin\\WebPushController@test');
             // Ticket
             $router->get ('/ticket/fetch', 'V1\\Admin\\TicketController@fetch');
             $router->post('/ticket/reply', 'V1\\Admin\\TicketController@reply');

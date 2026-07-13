@@ -54,16 +54,17 @@ class SendNoticeWebPushJob implements ShouldQueue, ShouldBeUnique
         $stats = $webPushService->sendNotice($notice);
 
         // 没有订阅时不算失败，直接标记已处理，避免任务反复重试
-        if ($stats['sent'] === 0 && $stats['failed'] === 0) {
+        if (($stats['sent'] ?? 0) === 0 && ($stats['failed'] ?? 0) === 0) {
             $notice->web_push_sent_at = time();
             $notice->save();
             Log::info('Notice web push processed with zero subscriptions', [
                 'notice_id' => $notice->id,
+                'total' => $stats['total'] ?? 0,
             ]);
             return;
         }
 
-        if ($stats['failed'] > 0 && $stats['sent'] === 0) {
+        if (($stats['failed'] ?? 0) > 0 && ($stats['sent'] ?? 0) === 0) {
             throw new \RuntimeException('公告浏览器推送全部投递失败');
         }
 
@@ -72,9 +73,10 @@ class SendNoticeWebPushJob implements ShouldQueue, ShouldBeUnique
 
         Log::info('Notice web push processed', [
             'notice_id' => $notice->id,
-            'sent' => $stats['sent'],
-            'failed' => $stats['failed'],
-            'expired' => $stats['expired'],
+            'total' => $stats['total'] ?? 0,
+            'sent' => $stats['sent'] ?? 0,
+            'failed' => $stats['failed'] ?? 0,
+            'expired' => $stats['expired'] ?? 0,
         ]);
     }
 }

@@ -309,3 +309,10 @@
   font-size: 11px;
   line-height: 1.4;
 }
+
+/* Web Push 管理 */
+.v2b-webpush-manage .card-header .block-title { margin: 0; }
+.v2b-webpush-manage .form-control { min-height: 38px; }
+.v2b-webpush-manage textarea.form-control { min-height: 90px; }
+.v2b-webpush-manage .table td { vertical-align: top; }
+.v2b-webpush-manage .font-size-h4 { font-size: 1.35rem; }

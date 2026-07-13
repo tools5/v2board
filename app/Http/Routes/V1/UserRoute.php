@@ -53,8 +53,10 @@ class UserRoute
             // Web Push
             $router->get ('/web-push/config', 'V1\\User\\WebPushController@config');
             $router->get ('/web-push/status', 'V1\\User\\WebPushController@status');
+            $router->get ('/web-push/devices', 'V1\\User\\WebPushController@devices');
             $router->post('/web-push/subscribe', 'V1\\User\\WebPushController@subscribe');
             $router->post('/web-push/unsubscribe', 'V1\\User\\WebPushController@unsubscribe');
+            $router->post('/web-push/test', 'V1\\User\\WebPushController@test');
             // Ticket
             $router->post('/ticket/reply', 'V1\\User\\TicketController@reply');
             $router->post('/ticket/close', 'V1\\User\\TicketController@close');

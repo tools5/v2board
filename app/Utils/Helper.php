@@ -208,34 +208,16 @@ class Helper
     {
         $request = $request ?: request();
 
-        // 同时读 header / server 超全局，兼容 Nginx 只写 $_SERVER 的情况
         $headerCandidates = [
-            'CF-Connecting-IP' => ['HTTP_CF_CONNECTING_IP', 'CF-Connecting-IP'],
-            'True-Client-IP' => ['HTTP_TRUE_CLIENT_IP', 'True-Client-IP'],
-            'X-Real-IP' => ['HTTP_X_REAL_IP', 'X-Real-IP'],
-            'X-Client-IP' => ['HTTP_X_CLIENT_IP', 'X-Client-IP'],
-            'X-Forwarded-For' => ['HTTP_X_FORWARDED_FOR', 'X-Forwarded-For'],
+            'CF-Connecting-IP',
+            'True-Client-IP',
+            'X-Real-IP',
+            'X-Client-IP',
+            'X-Forwarded-For',
         ];
 
-        foreach ($headerCandidates as $headerName => $serverKeys) {
+        foreach ($headerCandidates as $headerName) {
             $headerValue = $request->headers->get($headerName);
-            if (!$headerValue) {
-                foreach ($serverKeys as $serverKey) {
-                    $serverValue = $request->server($serverKey);
-                    if ($serverValue) {
-                        $headerValue = $serverValue;
-                        break;
-                    }
-                }
-            }
-            if (!$headerValue && isset($_SERVER)) {
-                foreach ($serverKeys as $serverKey) {
-                    if (!empty($_SERVER[$serverKey])) {
-                        $headerValue = $_SERVER[$serverKey];
-                        break;
-                    }
-                }
-            }
             if (!$headerValue) {
                 continue;
             }
@@ -243,10 +225,6 @@ class Helper
             // X-Forwarded-For 可能是 "client, proxy1, proxy2"
             $ipParts = explode(',', $headerValue);
             $candidateIp = trim($ipParts[0]);
-            // 去掉端口形式 1.2.3.4:1234
-            if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/', $candidateIp, $matches)) {
-                $candidateIp = $matches[1];
-            }
             if (self::isValidPublicOrPrivateIp($candidateIp)) {
                 return $candidateIp;
             }
@@ -257,7 +235,7 @@ class Helper
             return $fallbackIp;
         }
 
-        $remoteAddr = $request->server('REMOTE_ADDR') ?: (isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : null);
+        $remoteAddr = $request->server('REMOTE_ADDR');
         if ($remoteAddr && self::isValidPublicOrPrivateIp($remoteAddr)) {
             return $remoteAddr;
         }

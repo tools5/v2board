@@ -149,7 +149,7 @@ class ConfigController extends Controller
             ],
             'server' => [
                 'server_api_url' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.server_api_url')),
-                'server_token' => '',
+                'server_token' => config('v2board.server_token', ''),
                 'server_token_configured' => $this->isSecretConfigured('server_token'),
                 'server_token_allow_legacy' => (int)config('v2board.server_token_allow_legacy', 1),
                 'server_pull_interval' => config('v2board.server_pull_interval', 60),

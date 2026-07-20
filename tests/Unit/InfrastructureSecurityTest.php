@@ -134,7 +134,7 @@ class InfrastructureSecurityTest extends TestCase
         $this->assertFalse($method->invoke($controller, $bodyOnly));
     }
 
-    public function testConfigFetchDoesNotExposeSecretsAndBlankChangesPreserveThem(): void
+    public function testConfigFetchExposesServerTokenButKeepsOtherSecretsMasked(): void
     {
         config([
             'v2board.server_token' => 'server-secret-value',
@@ -148,7 +148,7 @@ class InfrastructureSecurityTest extends TestCase
         $payload = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
         $data = $payload['data'];
 
-        $this->assertSame('', $data['server']['server_token']);
+        $this->assertSame('server-secret-value', $data['server']['server_token']);
         $this->assertTrue($data['server']['server_token_configured']);
         $this->assertSame('', $data['email']['email_password']);
         $this->assertTrue($data['email']['email_password_configured']);

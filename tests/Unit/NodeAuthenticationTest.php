@@ -7,7 +7,10 @@ use App\Http\Controllers\V2\Server\ServerController;
 use App\Http\Requests\Admin\ConfigSave;
 use App\Services\ServerService;
 use App\Utils\Helper;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class NodeAuthenticationTest extends TestCase
@@ -34,6 +37,41 @@ class NodeAuthenticationTest extends TestCase
         $this->assertNotSame('', $token);
         $this->assertTrue(Helper::verifyNodeToken($token, 7, 'v2node'));
         $this->assertFalse(Helper::verifyNodeToken($token, 8, 'v2node'));
+    }
+
+    public function testV2nodeManagementExposesDerivedTokenInInstallCommand(): void
+    {
+        Schema::create('v2_server_v2node', function (Blueprint $table) {
+            $table->increments('id');
+            $table->string('name');
+            $table->integer('sort')->nullable();
+            $table->text('padding_scheme')->nullable();
+            $table->integer('created_at')->nullable();
+            $table->integer('updated_at')->nullable();
+        });
+
+        try {
+            DB::table('v2_server_v2node')->insert([
+                'id' => 7,
+                'name' => 'Test node',
+                'sort' => 1,
+                'created_at' => time(),
+                'updated_at' => time(),
+            ]);
+            config([
+                'v2board.server_token' => 'legacy-shared-token',
+                'v2board.server_api_url' => 'https://panel.example.com',
+            ]);
+
+            $node = (new ServerService())->getAllV2node()[0];
+            $expectedToken = Helper::getNodeToken(7, 'v2node');
+
+            $this->assertSame($expectedToken, $node['node_token']);
+            $this->assertStringContainsString('--node-id 7', $node['install_command']);
+            $this->assertStringContainsString($expectedToken, $node['install_command']);
+        } finally {
+            Schema::dropIfExists('v2_server_v2node');
+        }
     }
 
     public function testAuthenticationFailuresDoNotTerminateThePhpProcess(): void

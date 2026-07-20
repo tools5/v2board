@@ -4,7 +4,9 @@ namespace Tests\Unit;
 
 use App\Utils\CacheKey;
 use App\Utils\Helper;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class RegisterEmailLinkModeTest extends TestCase
@@ -15,12 +17,43 @@ class RegisterEmailLinkModeTest extends TestCase
     {
         parent::setUp();
         $this->originalV2boardConfig = config('v2board');
+        $this->resetUserTable();
+        Cache::flush();
     }
 
     protected function tearDown(): void
     {
+        Schema::dropIfExists('v2_user');
+        Cache::flush();
         config(['v2board' => $this->originalV2boardConfig]);
         parent::tearDown();
+    }
+
+    private function resetUserTable(): void
+    {
+        Schema::dropIfExists('v2_user');
+        Schema::create('v2_user', function (Blueprint $table) {
+            $table->increments('id');
+            $table->string('email')->unique();
+            $table->string('password')->nullable();
+            $table->string('uuid', 36)->nullable();
+            $table->string('token', 64)->nullable();
+            $table->unsignedInteger('invite_user_id')->nullable();
+            $table->unsignedBigInteger('transfer_enable')->default(0);
+            $table->unsignedInteger('device_limit')->default(0);
+            $table->unsignedInteger('plan_id')->default(0);
+            $table->unsignedInteger('group_id')->default(0);
+            $table->unsignedInteger('expired_at')->default(0);
+            $table->unsignedInteger('speed_limit')->default(0);
+            $table->unsignedInteger('last_login_at')->default(0);
+            $table->boolean('banned')->default(false);
+            $table->boolean('is_admin')->default(false);
+            $table->boolean('is_staff')->default(false);
+            $table->string('password_algo')->nullable();
+            $table->string('password_salt')->nullable();
+            $table->unsignedInteger('created_at')->nullable();
+            $table->unsignedInteger('updated_at')->nullable();
+        });
     }
 
     public function testGuestConfigExposesRegisterEmailMode(): void

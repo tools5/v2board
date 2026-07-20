@@ -5,8 +5,8 @@ namespace App\Http\Controllers\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Services\ThemeService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
+use Illuminate\Validation\Rule;
 
 class ThemeController extends Controller
 {
@@ -19,7 +19,9 @@ class ThemeController extends Controller
         $themeDirectories = glob($this->path . '*', GLOB_ONLYDIR) ?: [];
         $this->themes = array_values(array_filter(array_map(function ($item) {
             return basename($item);
-        }, $themeDirectories)));
+        }, $themeDirectories), function ($theme) {
+            return strlen($theme) <= 64 && preg_match('/^[A-Za-z0-9_-]+$/D', $theme) === 1;
+        }));
     }
 
     public function getThemes()
@@ -28,8 +30,13 @@ class ThemeController extends Controller
         foreach ($this->themes as $theme) {
             $themeConfigFile = $this->path . "{$theme}/config.json";
             if (!File::exists($themeConfigFile)) continue;
-            $themeConfig = json_decode(File::get($themeConfigFile), true);
-            if (!isset($themeConfig['configs']) || !is_array($themeConfig)) continue;
+            $themeConfig = json_decode(File::get($themeConfigFile), true, 64);
+            if (json_last_error() !== JSON_ERROR_NONE
+                || !is_array($themeConfig)
+                || !isset($themeConfig['configs'])
+                || !is_array($themeConfig['configs'])
+                || count($themeConfig['configs']) > 256
+            ) continue;
             $themeConfigs[$theme] = $themeConfig;
             if (config("theme.{$theme}")) continue;
             $themeService = new ThemeService($theme);
@@ -46,7 +53,7 @@ class ThemeController extends Controller
     public function getThemeConfig(Request $request)
     {
         $payload = $request->validate([
-            'name' => 'required|in:' . join(',', $this->themes)
+            'name' => ['required', 'string', 'max:64', Rule::in($this->themes)]
         ]);
         return response([
             'data' => config("theme.{$payload['name']}")
@@ -56,32 +63,22 @@ class ThemeController extends Controller
     public function saveThemeConfig(Request $request)
     {
         $payload = $request->validate([
-            'name' => 'required|in:' . join(',', $this->themes),
-            'config' => 'required'
+            'name' => ['required', 'string', 'max:64', Rule::in($this->themes)],
+            'config' => 'required|string|max:2097152'
         ]);
-        $payload['config'] = json_decode(base64_decode($payload['config']), true);
-        if (!$payload['config'] || !is_array($payload['config'])) abort(500, '参数有误');
-        $themeConfigFile = public_path("theme/{$payload['name']}/config.json");
-        if (!File::exists($themeConfigFile)) abort(500, '主题不存在');
-        $themeConfig = json_decode(File::get($themeConfigFile), true);
-        if (!isset($themeConfig['configs']) || !is_array($themeConfig)) abort(500, '主题配置文件有误');
-        $validateFields = array_column($themeConfig['configs'], 'field_name');
-        $config = [];
-        foreach ($validateFields as $validateField) {
-            $config[$validateField] = isset($payload['config'][$validateField]) ? $payload['config'][$validateField] : '';
-        }
-
-        File::ensureDirectoryExists(base_path() . '/config/theme/');
-
-        $data = var_export($config, 1);
-        if (!File::put(base_path() . "/config/theme/{$payload['name']}.php", "<?php\n return $data ;")) {
-            abort(500, '修改失败');
+        $decoded = base64_decode($payload['config'], true);
+        $payload['config'] = is_string($decoded) ? json_decode($decoded, true, 64) : null;
+        if (!is_array($payload['config']) || json_last_error() !== JSON_ERROR_NONE) {
+            abort(422, '参数有误');
         }
 
         try {
-            Artisan::call('config:cache');
-//            sleep(2);
-        } catch (\Exception $e) {
+            $themeService = new ThemeService($payload['name']);
+            $config = $themeService->save($payload['config']);
+        } catch (\InvalidArgumentException $error) {
+            abort(422, $error->getMessage());
+        } catch (\Throwable $error) {
+            report($error);
             abort(500, '保存失败');
         }
 

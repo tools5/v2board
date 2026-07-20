@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Coupon;
 use App\Models\Order;
-use Illuminate\Support\Facades\DB;
 
 class CouponService
 {
@@ -28,10 +27,10 @@ class CouponService
         $this->check();
         switch ($this->coupon->type) {
             case 1:
-                $order->discount_amount = $this->coupon->value;
+                $order->discount_amount = (int) $this->coupon->value;
                 break;
             case 2:
-                $order->discount_amount = $order->total_amount * ($this->coupon->value / 100);
+                $order->discount_amount = (int) round($order->total_amount * ($this->coupon->value / 100));
                 break;
         }
         if ($order->discount_amount > $order->total_amount) {
@@ -76,7 +75,7 @@ class CouponService
     {
         $usedCount = Order::where('coupon_id', $this->coupon->id)
             ->where('user_id', $this->userId)
-            ->whereNotIn('status', [0, 2])
+            ->where('status', '!=', OrderService::STATUS_CANCELLED)
             ->count();
         if ($usedCount >= $this->coupon->limit_use_with_user) return false;
         return true;

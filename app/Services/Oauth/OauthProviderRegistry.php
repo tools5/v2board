@@ -2,6 +2,8 @@
 
 namespace App\Services\Oauth;
 
+use App\Support\ConfiguredUrl;
+
 /**
  * 第三方登录平台注册表
  * 后续新增 GitHub / Google 等，只需在此增加配置项即可
@@ -159,9 +161,13 @@ class OauthProviderRegistry
     public static function defaultCallbackUrl(string $provider): string
     {
         $path = '/api/v1/passport/auth/oauth/callback?provider=' . urlencode($provider);
-        $appUrl = rtrim((string)config('v2board.app_url', ''), '/');
+        $appUrl = ConfiguredUrl::applicationUrl();
 
-        return $appUrl !== '' ? $appUrl . $path : url($path);
+        if ($appUrl === '') {
+            throw new \RuntimeException('Application URL must be configured for OAuth callbacks');
+        }
+
+        return $appUrl . $path;
     }
 
     /**
@@ -222,7 +228,7 @@ class OauthProviderRegistry
 
     /**
      * 从请求输入 + 现有配置中解析 Bot Token（保存校验用）。
-     * 请求里显式提交空字符串表示“清空登录专用 token，依赖回退”。
+     * 后台不回显密钥，因此空输入表示保留现有登录专用 token。
      */
     public static function resolveBotTokenFromInput(string $provider, array $input): string
     {
@@ -236,13 +242,8 @@ class OauthProviderRegistry
             if ($submitted !== '') {
                 return $submitted;
             }
-            // 显式清空登录专用 token：看回退
-            $fallbackKey = $meta['bot_token_fallback_key'] ?? null;
-            if ($fallbackKey) {
-                return trim((string)config('v2board.' . $fallbackKey, ''));
-            }
-            return '';
         }
+
         return self::resolveBotToken($provider);
     }
 
@@ -302,7 +303,9 @@ class OauthProviderRegistry
                 $item['bot_username'] = $username;
                 $item['redirect_url'] = null;
             } else {
-                $item['redirect_url'] = url('/api/v1/passport/auth/oauth/redirect?provider=' . urlencode($key));
+                $redirectPath = '/api/v1/passport/auth/oauth/redirect?provider=' . urlencode($key);
+                $appUrl = ConfiguredUrl::applicationUrl();
+                $item['redirect_url'] = $appUrl !== '' ? $appUrl . $redirectPath : $redirectPath;
             }
             $list[] = $item;
         }
@@ -465,9 +468,15 @@ class OauthProviderRegistry
             if (!$configKey) {
                 continue;
             }
+
             $value = array_key_exists($configKey, $input)
                 ? $input[$configKey]
                 : config('v2board.' . $configKey, '');
+            // Secret fields are intentionally masked by the admin API. A blank
+            // submission therefore means retain the currently configured secret.
+            if ($metaKey === 'client_secret_key' && trim((string)$value) === '') {
+                $value = config('v2board.' . $configKey, '');
+            }
             if (trim((string)$value) === '') {
                 $missing[] = $configKey;
             }

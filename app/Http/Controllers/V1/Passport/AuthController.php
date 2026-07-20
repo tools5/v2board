@@ -16,6 +16,7 @@ use App\Models\Plan;
 use App\Models\User;
 use App\Models\UserOauth;
 use App\Services\AuthService;
+use App\Support\ConfiguredUrl;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
@@ -73,14 +74,25 @@ class AuthController extends Controller
         $email = $request->input('email');
         $cacheKeyEmail = is_string($email) ? strtolower(trim($email)) : '';
         if ((int)config('v2board.email_verify', 0)) {
+            $verifyAttemptKey = 'email_verify:register:' . hash(
+                'sha256',
+                $cacheKeyEmail . '|' . (string)$request->ip()
+            );
+            if (RateLimiter::tooManyAttempts($verifyAttemptKey, 5)) {
+                abort(429, __('Too many requests, please try again later.'));
+            }
+
             $inputCode = $request->input('email_code');
             if (!is_string($inputCode) || !preg_match('/^\d{6}$/', $inputCode)) {
+                RateLimiter::hit($verifyAttemptKey, 300);
                 abort(500, __('Incorrect email verification code'));
             }
             $cachedCode = Cache::get(CacheKey::get('EMAIL_VERIFY_CODE', $cacheKeyEmail));
             if ($cachedCode === null || $cachedCode === '' || !hash_equals((string)$cachedCode, $inputCode)) {
+                RateLimiter::hit($verifyAttemptKey, 300);
                 abort(500, __('Incorrect email verification code'));
             }
+            RateLimiter::clear($verifyAttemptKey);
         }
         $password = $request->input('password');
         $exist = User::where('email', $email)->first();
@@ -176,19 +188,18 @@ class AuthController extends Controller
             abort(500, __('Email verification code has been sent, please request again later'));
         }
 
+        $baseUrl = $this->configuredApplicationUrl();
         $token = Helper::guid();
         $expireSeconds = 1800;
+        $link = $this->buildFrontendAuthLink('register', [
+            'register_token' => $token,
+        ]);
         Cache::put(CacheKey::get('REGISTER_LINK_TOKEN', $token), [
             'email' => $email,
             'invite_code' => $inviteCode,
             'created_at' => time(),
         ], $expireSeconds);
         Cache::put(CacheKey::get('LAST_SEND_REGISTER_LINK_TIMESTAMP', $cacheKeyEmail), time(), 60);
-
-        $baseUrl = rtrim((string)config('v2board.app_url') ?: url('/'), '/');
-        $link = $this->buildFrontendAuthLink('register', [
-            'register_token' => $token,
-        ]);
 
         SendEmailJob::dispatch([
             'email' => $email,
@@ -310,7 +321,7 @@ class AuthController extends Controller
      */
     private function buildFrontendAuthLink(string $page, array $query = []): string
     {
-        $baseUrl = rtrim((string)config('v2board.app_url') ?: url('/'), '/');
+        $baseUrl = $this->configuredApplicationUrl();
         $theme = (string)config('v2board.frontend_theme', 'default');
         $queryString = http_build_query($query);
 
@@ -323,6 +334,36 @@ class AuthController extends Controller
 
         // 当前内置主题均走 hash 路由
         return $baseUrl . '/#/' . $hashPage . ($queryString !== '' ? '?' . $queryString : '');
+    }
+
+    private function configuredApplicationUrl(): string
+    {
+        $applicationUrl = ConfiguredUrl::applicationUrl();
+        if ($applicationUrl === '') {
+            abort(500, '站点地址未正确配置，请在后台设置 app_url');
+        }
+
+        return rtrim($applicationUrl, '/');
+    }
+
+    private function buildQuickLoginUrl(string $token, $redirect): string
+    {
+        $query = http_build_query([
+            'verify' => $token,
+            'redirect' => ConfiguredUrl::normalizeFrontendRedirect($redirect),
+        ], '', '&', PHP_QUERY_RFC3986);
+
+        return ConfiguredUrl::applicationPathUrl('/#/login?' . $query);
+    }
+
+    private function requireQuickLoginToken($token): string
+    {
+        if (!is_string($token) || $token === '' || strlen($token) > 1024
+            || preg_match('/[\x00-\x1F\x7F]/', $token)) {
+            abort(400, __('Token error'));
+        }
+
+        return $token;
     }
 
     /**
@@ -421,18 +462,16 @@ class AuthController extends Controller
 
     public function token2Login(Request $request)
     {
-        if ($request->input('token')) {
-            $redirect = '/#/login?verify=' . $request->input('token') . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-            if (config('v2board.app_url')) {
-                $location = config('v2board.app_url') . $redirect;
-            } else {
-                $location = url($redirect);
-            }
-            return redirect()->to($location)->send();
+        $token = $request->input('token');
+        if ($token !== null && $token !== '') {
+            $token = $this->requireQuickLoginToken($token);
+            return redirect()->away($this->buildQuickLoginUrl($token, $request->input('redirect')));
         }
 
-        if ($request->input('verify')) {
-            $key =  CacheKey::get('TEMP_TOKEN', $request->input('verify'));
+        $verify = $request->input('verify');
+        if ($verify !== null && $verify !== '') {
+            $verify = $this->requireQuickLoginToken($verify);
+            $key = CacheKey::get('TEMP_TOKEN', $verify);
             $userId = Cache::get($key);
             if (!$userId) {
                 abort(500, __('Token error'));
@@ -450,11 +489,13 @@ class AuthController extends Controller
                 'data' => $authService->generateAuthData($request)
             ]);
         }
+
+        abort(400, __('Token error'));
     }
 
     public function getQuickLoginUrl(Request $request)
     {
-        $authorization = $request->input('auth_data') ?? $request->header('authorization');
+        $authorization = AuthService::extractAuthData($request);
         if (!$authorization) abort(403, '未登录或登陆已过期');
 
         $user = AuthService::decryptAuthData($authorization);
@@ -463,12 +504,7 @@ class AuthController extends Controller
         $code = Helper::guid();
         $key = CacheKey::get('TEMP_TOKEN', $code);
         Cache::put($key, $user['id'], 60);
-        $redirect = '/#/login?verify=' . $code . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-        if (config('v2board.app_url')) {
-            $url = config('v2board.app_url') . $redirect;
-        } else {
-            $url = url($redirect);
-        }
+        $url = $this->buildQuickLoginUrl($code, $request->input('redirect'));
         return response([
             'data' => $url
         ]);
@@ -561,19 +597,18 @@ class AuthController extends Controller
             abort(500, __('Email verification code has been sent, please request again later'));
         }
 
+        $baseUrl = $this->configuredApplicationUrl();
         $token = Helper::guid();
         $expireSeconds = 1800;
+        $link = $this->buildFrontendAuthLink('forgot-password', [
+            'reset_token' => $token,
+        ]);
         Cache::put(CacheKey::get('PASSWORD_RESET_LINK_TOKEN', $token), [
             'email' => $email,
             'user_id' => $user->id,
             'created_at' => time(),
         ], $expireSeconds);
         Cache::put(CacheKey::get('LAST_SEND_PASSWORD_RESET_LINK_TIMESTAMP', $cacheKeyEmail), time(), 60);
-
-        $baseUrl = rtrim((string)config('v2board.app_url') ?: url('/'), '/');
-        $link = $this->buildFrontendAuthLink('forgot-password', [
-            'reset_token' => $token,
-        ]);
 
         SendEmailJob::dispatch([
             'email' => $email,

@@ -2,6 +2,7 @@
 
 namespace App\Protocols;
 
+use App\Support\SubscriptionHeaders;
 use App\Utils\Helper;
 
 class QuantumultX
@@ -27,7 +28,7 @@ class QuantumultX
         $expire = $user['expired_at'] ?? 0;
         $uuid = $user['uuid'] ?? '';
 
-        header("subscription-userinfo: upload={$upload}; download={$download}; total={$total}; expire={$expire}");
+        SubscriptionHeaders::send('subscription-userinfo', SubscriptionHeaders::userInfo($user));
 
         foreach ($servers as $item) {
             if (($item['type'] ?? null) === 'v2node' && isset($item['protocol'])) {

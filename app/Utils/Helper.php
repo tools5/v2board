@@ -2,6 +2,7 @@
 
 namespace App\Utils;
 use App\Models\User;
+use App\Support\ConfiguredUrl;
 use Illuminate\Support\Facades\Cache;
 
 class Helper
@@ -13,34 +14,130 @@ class Helper
 
     public static function getServerKey($timestamp, $length)
     {
-        return base64_encode(substr(md5($timestamp), 0, $length));
+        $length = max(1, min(32, (int)$length));
+        $secret = (string)config('v2board.server_token', '');
+        if ($secret === '') {
+            $secret = (string)config('app.key', '');
+        }
+        if ($secret === '') {
+            throw new \RuntimeException('A server token or application key is required');
+        }
+
+        $key = hash_hmac('sha256', 'server-key:' . (string)$timestamp, $secret, true);
+        return base64_encode(substr($key, 0, $length));
+    }
+
+    public static function getNodeToken($nodeId, $nodeType)
+    {
+        $nodeId = filter_var($nodeId, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $nodeType = self::normalizeNodeType($nodeType);
+        $secret = (string)config('v2board.server_token', '');
+
+        if (!$nodeId || $nodeType === '' || $secret === '') {
+            return '';
+        }
+
+        return hash_hmac('sha256', $nodeType . ':' . $nodeId, $secret);
+    }
+
+    public static function verifyNodeToken($token, $nodeId, $nodeType)
+    {
+        if (!is_string($token) || $token === '') {
+            return false;
+        }
+
+        $expected = self::getNodeToken($nodeId, $nodeType);
+        if ($expected !== '' && hash_equals($expected, $token)) {
+            return true;
+        }
+
+        $allowLegacy = filter_var(
+            config('v2board.server_token_allow_legacy', false),
+            FILTER_VALIDATE_BOOLEAN
+        );
+        $legacyToken = (string)config('v2board.server_token', '');
+
+        return $allowLegacy
+            && $legacyToken !== ''
+            && hash_equals($legacyToken, $token);
+    }
+
+    public static function normalizeNodeType($nodeType)
+    {
+        $nodeType = strtolower(trim((string)$nodeType));
+        if ($nodeType === 'v2ray') {
+            return 'vmess';
+        }
+        if ($nodeType === 'hysteria2') {
+            return 'hysteria';
+        }
+
+        return preg_match('/^[a-z0-9_-]+$/', $nodeType) ? $nodeType : '';
     }
 
     public static function guid($format = false)
     {
-        if (function_exists('com_create_guid') === true) {
-            return md5(trim(com_create_guid(), '{}'));
-        }
-        $data = openssl_random_pseudo_bytes(16);
-        $data[6] = chr(ord($data[6]) & 0x0f | 0x40); // set version to 0100
-        $data[8] = chr(ord($data[8]) & 0x3f | 0x80); // set bits 6-7 to 10
+        $data = random_bytes(16);
+        $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
+        $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
+
         if ($format) {
             return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
         }
-        return md5(vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4)) . '-' . time());
+
+        // Existing callers expect a 32-character token rather than a UUID.
+        return bin2hex(random_bytes(16));
     }
 
     public static function generateOrderNo(): string
     {
-        $randomChar = mt_rand(10000, 99999);
-        return date('YmdHms') . substr(microtime(), 2, 6) . $randomChar;
+        return (new \DateTimeImmutable('now'))->format('YmdHisv') . random_int(10000, 99999);
     }
 
     public static function exchange($from, $to)
     {
-        $result = file_get_contents('https://api.exchangerate.host/latest?symbols=' . $to . '&base=' . $from);
-        $result = json_decode($result, true);
-        return $result['rates'][$to];
+        $from = strtoupper(trim((string)$from));
+        $to = strtoupper(trim((string)$to));
+        if (!preg_match('/\A[A-Z]{3}\z/', $from) || !preg_match('/\A[A-Z]{3}\z/', $to)) {
+            throw new \InvalidArgumentException('Currency codes must be ISO 4217 three-letter codes');
+        }
+
+        try {
+            $client = new \GuzzleHttp\Client([
+                'base_uri' => 'https://api.exchangerate.host/',
+                'connect_timeout' => 5,
+                'timeout' => 15,
+                'http_errors' => false,
+                'allow_redirects' => false,
+            ]);
+            $response = $client->get('latest', [
+                'query' => [
+                    'symbols' => $to,
+                    'base' => $from,
+                ],
+            ]);
+        } catch (\Throwable $error) {
+            throw new \RuntimeException('Unable to retrieve exchange rate', 0, $error);
+        }
+
+        if ($response->getStatusCode() < 200 || $response->getStatusCode() >= 300) {
+            throw new \RuntimeException('Exchange rate service returned an unsuccessful response');
+        }
+
+        try {
+            $payload = json_decode((string)$response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $error) {
+            throw new \RuntimeException('Exchange rate service returned invalid JSON', 0, $error);
+        }
+
+        $rate = $payload['rates'][$to] ?? null;
+        if (!is_numeric($rate) || (float)$rate <= 0) {
+            throw new \RuntimeException('Exchange rate service returned an invalid rate');
+        }
+
+        return (float)$rate;
     }
 
     public static function randomChar($len, $special = false)
@@ -60,23 +157,35 @@ class Helper
 
     public static function multiPasswordVerify($algo, $salt, $password, $hash)
     {
+        $password = (string)$password;
+        $hash = (string)$hash;
         switch($algo) {
-            case 'md5': return md5($password) === $hash;
-            case 'sha256': return hash('sha256', $password) === $hash;
-            case 'md5salt': return md5($password . $salt) === $hash;
+            case 'md5': return hash_equals($hash, md5($password));
+            case 'sha256': return hash_equals($hash, hash('sha256', $password));
+            case 'md5salt': return hash_equals($hash, md5($password . (string)$salt));
             default: return password_verify($password, $hash);
         }
     }
 
     public static function emailSuffixVerify($email, $suffixs)
     {
-        $suffix = preg_split('/@/', $email)[1];
-        if (!$suffix) return false;
-        if (!is_array($suffixs)) {
-            $suffixs = preg_split('/,/', $suffixs);
+        $email = trim((string)$email);
+        $at = strrpos($email, '@');
+        if ($at === false || $at === 0 || $at === strlen($email) - 1) {
+            return false;
         }
-        if (!in_array($suffix, $suffixs)) return false;
-        return true;
+
+        $suffix = strtolower(substr($email, $at + 1));
+        if (!is_array($suffixs)) {
+            $suffixs = explode(',', (string)$suffixs);
+        }
+        $suffixs = array_values(array_filter(array_map(function ($value) {
+            return strtolower(trim((string)$value));
+        }, $suffixs), function ($value) {
+            return $value !== '';
+        }));
+
+        return in_array($suffix, $suffixs, true);
     }
 
     public static function trafficConvert(int $byte)
@@ -99,52 +208,89 @@ class Helper
 
     public static function getSubscribeUrl($token)
     {
+        $token = trim((string)$token);
+        if ($token === '') {
+            throw new \InvalidArgumentException('Subscription token is required');
+        }
+
         $submethod = (int)config('v2board.show_subscribe_method', 0);
-        $path = config('v2board.subscribe_path', '/api/v1/client/subscribe');
-        if (empty($path)) {
+        $path = trim((string)config('v2board.subscribe_path', '/api/v1/client/subscribe'));
+        if ($path === '') {
             $path = '/api/v1/client/subscribe';
-        } 
-        $subscribeUrls = explode(',', config('v2board.subscribe_url'));
-        $subscribeUrl = $subscribeUrls[rand(0, count($subscribeUrls) - 1)];
+        }
+        $path = '/' . ltrim($path, '/');
+
+        $subscribeUrls = [];
+        foreach (explode(',', (string)config('v2board.subscribe_url', '')) as $configuredUrl) {
+            $configuredUrl = ConfiguredUrl::normalizeHttpUrl($configuredUrl);
+            if ($configuredUrl !== '') {
+                $subscribeUrls[] = $configuredUrl;
+            }
+        }
+        $subscribeUrl = $subscribeUrls
+            ? $subscribeUrls[random_int(0, count($subscribeUrls) - 1)]
+            : '';
+
+        $buildUrl = static function (string $subscriptionToken) use ($path, $subscribeUrl): string {
+            $separator = strpos($path, '?') === false ? '?' : '&';
+            $requestPath = $path . $separator . http_build_query([
+                'token' => $subscriptionToken,
+            ], '', '&', PHP_QUERY_RFC3986);
+            if ($subscribeUrl !== '') {
+                return $subscribeUrl . $requestPath;
+            }
+
+            return ConfiguredUrl::applicationPathUrl($requestPath);
+        };
+
         switch ($submethod) {
-            case 0:
-                $path = "{$path}?token={$token}";
-                if ($subscribeUrl) return $subscribeUrl . $path;
-                return url($path);
-                break;
             case 1:
                 $newtoken = Cache::get("otp_{$token}");
-                if (!$newtoken) {
+                if (!is_string($newtoken) || $newtoken === '') {
                     $newtoken = self::base64EncodeUrlSafe(random_bytes(24));
-                    $added = Cache::add("otp_{$token}", $newtoken, 86400);
-                    if ($added) {
-                        Cache::put("otpn_{$newtoken}", $token, 86400);
-                    } else {
-                        $newtoken = Cache::get("otp_{$token}");
+                    if (!Cache::add("otp_{$token}", $newtoken, 86400)) {
+                        $existingToken = Cache::get("otp_{$token}");
+                        if (is_string($existingToken) && $existingToken !== '') {
+                            $newtoken = $existingToken;
+                        }
                     }
+                    Cache::put("otpn_{$newtoken}", $token, 86400);
                 }
-                $path = "{$path}?token={$newtoken}";
-                if ($subscribeUrl) return $subscribeUrl . $path;
-                return url($path);
-                break;
+
+                return $buildUrl($newtoken);
             case 2:
-                $timestep = (int)config('v2board.show_subscribe_expire', 5) * 60;
-                $counter = floor(time() / $timestep);
+                $timestep = max(60, (int)config('v2board.show_subscribe_expire', 5) * 60);
+                $counter = intdiv(time(), $timestep);
                 $counterBytes = pack('N*', 0) . pack('N*', $counter);
                 $hash = hash_hmac('sha1', $counterBytes, $token, false);
                 $user = User::where('token', $token)->select('id')->first();
-                $newtoken = self::base64EncodeUrlSafe("{$user->id}:{$hash}");
+                if (!$user) {
+                    throw new \RuntimeException('Subscription token user was not found');
+                }
 
-                $path = "{$path}?token={$newtoken}";
-                if ($subscribeUrl) return $subscribeUrl . $path;
-                return url($path);
-                break;
+                return $buildUrl(self::base64EncodeUrlSafe("{$user->id}:{$hash}"));
+            case 0:
+            default:
+                return $buildUrl($token);
         }
     }
 
-    public static function randomPort($range) {
-        $portRange = explode('-', $range);
-        return rand($portRange[0], $portRange[1]);
+    public static function randomPort($range)
+    {
+        $parts = array_map('trim', explode('-', (string)$range));
+        if (count($parts) !== 2
+            || !preg_match('/\A\d{1,5}\z/', $parts[0])
+            || !preg_match('/\A\d{1,5}\z/', $parts[1])) {
+            throw new \InvalidArgumentException('Port range must be in min-max format');
+        }
+
+        $min = (int)$parts[0];
+        $max = (int)$parts[1];
+        if ($min < 1 || $max > 65535 || $min > $max) {
+            throw new \InvalidArgumentException('Port range is outside the valid TCP/UDP range');
+        }
+
+        return random_int($min, $max);
     }
 
     public static function base64EncodeUrlSafe($data)
@@ -155,12 +301,21 @@ class Helper
 
     public static function base64DecodeUrlSafe($data)
     {
-        $b64 = str_replace(['-', '_'], ['+', '/'], $data);
-        $pad = 4 - (strlen($b64) % 4);
-        if ($pad < 4) {
-            $b64 .= str_repeat('=', $pad);
+        $data = (string)$data;
+        if (!preg_match('/\A[A-Za-z0-9_-]*\z/', $data)) {
+            return false;
         }
-        return base64_decode($b64);
+
+        $b64 = str_replace(['-', '_'], ['+', '/'], $data);
+        $remainder = strlen($b64) % 4;
+        if ($remainder === 1) {
+            return false;
+        }
+        if ($remainder > 0) {
+            $b64 .= str_repeat('=', 4 - $remainder);
+        }
+
+        return base64_decode($b64, true);
     }
 
     public static function encodeURIComponent($str) {

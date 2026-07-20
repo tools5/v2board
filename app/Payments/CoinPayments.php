@@ -2,7 +2,11 @@
 
 namespace App\Payments;
 
+use App\Payments\Support\PaymentAmountSupport;
+
 class CoinPayments {
+    use PaymentAmountSupport;
+
     public function __construct($config) {
         $this->config = $config;
     }
@@ -60,45 +64,69 @@ class CoinPayments {
 
     public function notify($params)
     {
-
-        if (!isset($params['merchant']) || $params['merchant'] != trim($this->config['coinpayments_merchant_id'])) {
-            abort(500, 'No or incorrect Merchant ID passed');
+        $secret = $this->callbackScalarString($this->config['coinpayments_ipn_secret'] ?? null);
+        $signHeader = $this->callbackScalarString(request()->header('Hmac', ''));
+        $payload = request()->getContent();
+        if ($secret === null || $secret === '' || $signHeader === null || $signHeader === ''
+            || !is_string($payload) || $payload === '') {
+            abort(400, 'HMAC signature is missing');
         }
 
-        $headers = getallheaders();
-
-        ksort($params);
-        reset($params);
-        $request = stripslashes(http_build_query($params));
-
-        $headerName = 'Hmac';
-        $signHeader = isset($headers[$headerName]) ? $headers[$headerName] : '';
-
-        $hmac = hash_hmac("sha512", $request, trim($this->config['coinpayments_ipn_secret']));
-
-        // if ($hmac != $signHeader) { <-- Use this if you are running a version of PHP below 5.6.0 without the hash_equals function
-        //     abort(400, 'HMAC signature does not match');
-        // }
-
+        $hmac = hash_hmac('sha512', $payload, $secret);
         if (!hash_equals($hmac, $signHeader)) {
             abort(400, 'HMAC signature does not match');
         }
 
-        // HMAC Signature verified at this point, load some variables.
-        $status = $params['status'];
+        $requiredFields = ['merchant', 'status', 'item_number', 'txn_id'];
+        if (!$this->hasScalarCallbackFields($params, $requiredFields)
+            || !$this->hasOnlyScalarCallbackValues($params)) {
+            abort(400, 'Required IPN fields are missing');
+        }
+        $merchantId = $this->callbackScalarString($this->config['coinpayments_merchant_id'] ?? null);
+        $callbackMerchant = $this->callbackScalarString($params['merchant']);
+        $statusValue = $this->callbackScalarString($params['status']);
+        if ($merchantId === null || $merchantId === ''
+            || $callbackMerchant === null || !hash_equals($merchantId, $callbackMerchant)) {
+            abort(400, 'CoinPayments merchant does not match');
+        }
+        if ($statusValue === null || !preg_match('/\A-?\d+\z/', $statusValue)) {
+            abort(400, 'CoinPayments status is invalid');
+        }
+
+        $status = (int) $statusValue;
         if ($status >= 100 || $status == 2) {
-            // payment is complete or queued for nightly payout, success
+            if (!$this->hasScalarCallbackFields($params, ['amount1', 'currency1'])) {
+                abort(400, 'Payment amount or currency is missing');
+            }
+            $amount = $this->decimalToCents($params['amount1']);
+            $currencyValue = $this->callbackScalarString($params['currency1']);
+            $expectedCurrencyValue = $this->callbackScalarString(
+                $this->config['coinpayments_currency'] ?? null
+            );
+            $itemNumber = $this->callbackScalarString($params['item_number']);
+            $transactionId = $this->callbackScalarString($params['txn_id']);
+            $currency = $currencyValue === null ? '' : strtoupper($currencyValue);
+            $expectedCurrency = $expectedCurrencyValue === null ? '' : strtoupper($expectedCurrencyValue);
+            if ($amount === null || $amount <= 0 || $currency === '' || $expectedCurrency === ''
+                || $itemNumber === null || $itemNumber === ''
+                || $transactionId === null || $transactionId === '') {
+                abort(400, 'Payment amount is invalid');
+            }
+
             return [
-                'trade_no' => $params['item_number'],
-                'callback_no' => $params['txn_id'],
+                'trade_no' => $itemNumber,
+                'callback_no' => $transactionId,
+                'amount' => $amount,
+                'currency' => $currency,
+                'expected_currency' => $expectedCurrency,
                 'custom_result' => 'IPN OK'
             ];
-        } else if ($status < 0) {
-            //payment error, this is usually final but payments will sometimes be reopened if there was no exchange rate conversion or with seller consent
-            abort(500, 'Payment Timed Out or Error');
-        } else {
-            //payment is pending, you can optionally add a note to the order page
-            return('IPN OK: pending');
         }
+
+        return [
+            'acknowledge_only' => true,
+            'custom_result' => $status < 0 ? 'IPN OK' : 'IPN OK: pending'
+        ];
     }
+
 }

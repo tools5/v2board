@@ -37,11 +37,11 @@ class Client
             case 2:
                 $usertoken = Cache::get("totp_{$token}");
                 if (!$usertoken) {
-                    $timestep = (int)config('v2board.show_subscribe_expire', 5) * 60;
-                    $counter = floor(time() / $timestep);
+                    $timestep = max(60, (int)config('v2board.show_subscribe_expire', 5) * 60);
+                    $counter = intdiv(time(), $timestep);
                     $counterBytes = pack('N*', 0) . pack('N*', $counter);
                     $idhash = Helper::base64DecodeUrlSafe($token);
-                    if (strpos($idhash, ':') === false) {
+                    if ($idhash === false || strpos($idhash, ':') === false) {
                         abort(403, 'token is error');
                     }
                     $parts = explode(':', $idhash, 2);
@@ -55,7 +55,7 @@ class Client
                     }
                     $usertoken = $user->token;
                     $hash = hash_hmac('sha1', $counterBytes, $usertoken, false);
-                    if ($clienthash !== $hash) {
+                    if (!hash_equals($hash, (string)$clienthash)) {
                         abort(403, 'token is error');
                     }
                     Cache::put("totp_{$token}", $usertoken, $timestep);

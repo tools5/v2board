@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\V1\Server;
 
+use App\Support\EtagMatcher;
+
 use App\Http\Controllers\Controller;
 use App\Services\ServerService;
 use App\Services\UserService;
@@ -21,16 +23,20 @@ class UniProxyController extends Controller
     public function __construct(Request $request)
     {
         $token = $request->input('token');
+
         if (empty($token)) {
             abort(500, 'token is null');
         }
-        if ($token !== config('v2board.server_token')) {
-            abort(500, 'token is error');
+        $this->nodeType = Helper::normalizeNodeType($request->input('node_type'));
+        $this->nodeId = filter_var($request->input('node_id'), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if ($this->nodeType === '' || !$this->nodeId) {
+            abort(400, 'node parameter is error');
         }
-        $this->nodeType = $request->input('node_type');
-        if ($this->nodeType === 'v2ray') $this->nodeType = 'vmess';
-        if ($this->nodeType === 'hysteria2') $this->nodeType = 'hysteria';
-        $this->nodeId = $request->input('node_id');
+        if (!Helper::verifyNodeToken($token, $this->nodeId, $this->nodeType)) {
+            abort(403, 'token is error');
+        }
         $this->serverService = new ServerService();
         $this->nodeInfo = $this->serverService->getServer($this->nodeId, $this->nodeType);
         if (!$this->nodeInfo) abort(500, 'server is not exist');
@@ -53,15 +59,15 @@ class UniProxyController extends Controller
             $packer = new Packer();
             $response = $packer->pack($response);
             $eTag = sha1($response);
-            if (strpos($request->header('If-None-Match'), $eTag) !== false) {
-                abort(304);
+            if (EtagMatcher::matches($request->header('If-None-Match'), $eTag)) {
+                return response('', 304)->header('ETag', "\"{$eTag}\"");
             }
 
             return response($response, 200, ['Content-Type' => 'application/x-msgpack'])->header('ETag', "\"{$eTag}\"");
         } else {
             $eTag = sha1(json_encode($response));
-            if (strpos($request->header('If-None-Match'), $eTag) !== false) {
-                abort(304);
+            if (EtagMatcher::matches($request->header('If-None-Match'), $eTag)) {
+                return response('', 304)->header('ETag', "\"{$eTag}\"");
             }
 
             return response($response)->header('ETag', "\"{$eTag}\"");
@@ -303,8 +309,8 @@ class UniProxyController extends Controller
             $response['routes'] = $this->serverService->getRoutes($this->nodeInfo['route_id']);
         }
         $eTag = sha1(json_encode($response));
-        if (strpos($request->header('If-None-Match'), $eTag) !== false) {
-            abort(304);
+        if (EtagMatcher::matches($request->header('If-None-Match'), $eTag)) {
+            return response('', 304)->header('ETag', "\"{$eTag}\"");
         }
 
         return response($response)->header('ETag', "\"{$eTag}\"");

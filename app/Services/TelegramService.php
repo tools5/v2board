@@ -4,22 +4,28 @@ namespace App\Services;
 use App\Jobs\SendTelegramJob;
 use App\Models\User;
 use \Curl\Curl;
-use Illuminate\Mail\Markdown;
 
 class TelegramService {
     protected $api;
+    protected $token;
 
     public function __construct($token = '')
     {
-        $this->api = 'https://api.telegram.org/bot' . config('v2board.telegram_bot_token', $token) . '/';
+        $token = trim((string)$token);
+        $this->token = $token !== ''
+            ? $token
+            : trim((string)config('v2board.telegram_bot_token', ''));
+        $this->api = 'https://api.telegram.org/bot' . $this->token . '/';
     }
 
     public function sendMessage(int $chatId, string $text, string $parseMode = '')
     {
-        if ($parseMode === 'markdown') {
-            $text = str_replace('_', '\_', $text);
+        if (strtolower($parseMode) === 'markdown') {
+            $text = $this->escapeMarkdownV2($text);
+            $parseMode = 'MarkdownV2';
         }
-        $this->request('sendMessage', [
+
+        return $this->request('sendMessage', [
             'chat_id' => $chatId,
             'text' => $text,
             'parse_mode' => $parseMode
@@ -47,13 +53,27 @@ class TelegramService {
         return $this->request('getMe');
     }
 
-    public function setWebhook(string $url)
+    public function setWebhook(string $url, string $secretToken = '')
     {
+        $parts = parse_url($url);
+        if (!is_array($parts)
+            || strtolower((string)($parts['scheme'] ?? '')) !== 'https'
+            || empty($parts['host'])) {
+            throw new \InvalidArgumentException('Telegram webhook URL must use HTTPS');
+        }
+        if ($secretToken !== '' && !preg_match('/\A[A-Za-z0-9_-]{1,256}\z/', $secretToken)) {
+            throw new \InvalidArgumentException('Telegram webhook secret token is invalid');
+        }
+
         $commands = $this->discoverCommands(base_path('app/Plugins/Telegram/Commands'));
         $this->setMyCommands($commands);
-        return $this->request('setWebhook', [
-            'url' => $url
-        ]);
+
+        $params = ['url' => $url];
+        if ($secretToken !== '') {
+            $params['secret_token'] = $secretToken;
+        }
+
+        return $this->request('setWebhook', $params);
     }
 
     public function discoverCommands(string $directory): array
@@ -104,21 +124,70 @@ class TelegramService {
     public function setMyCommands(array $commands)
     {
         $this->request('setMyCommands', [
-            'commands' => json_encode($commands),
+            'commands' => array_values($commands),
         ]);
     }
 
     private function request(string $method, array $params = [])
     {
-        $curl = new Curl();
-        $curl->get($this->api . $method . '?' . http_build_query($params));
-        $response = $curl->response;
-        $curl->close();
-        if (!isset($response->ok)) abort(500, '请求失败');
-        if (!$response->ok) {
-            abort(500, '来自TG的错误：' . $response->description);
+        if (!preg_match('/\A[0-9]{5,20}:[A-Za-z0-9_-]{20,}\z/', $this->token)) {
+            throw new \RuntimeException('Telegram bot token is not configured or invalid');
         }
+        if (!preg_match('/\A[A-Za-z][A-Za-z0-9]*\z/', $method)) {
+            throw new \InvalidArgumentException('Invalid Telegram API method');
+        }
+
+        $payload = json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($payload === false) {
+            throw new \InvalidArgumentException('Telegram request contains invalid data');
+        }
+
+        $curl = new Curl();
+        $curl->setConnectTimeout(5);
+        $curl->setTimeout(15);
+        $curl->setHeader('Content-Type', 'application/json');
+        $curl->setOpt(CURLOPT_FOLLOWLOCATION, false);
+
+        try {
+            $curl->post($this->api . $method, $payload);
+            $response = $curl->response;
+            $error = $curl->error;
+            $errorMessage = $curl->errorMessage;
+        } finally {
+            $curl->close();
+        }
+
+        if (is_string($response)) {
+            $response = json_decode($response);
+        }
+        if (is_object($response) && property_exists($response, 'ok') && $response->ok !== true) {
+            $description = property_exists($response, 'description')
+                ? $response->description
+                : 'unknown error';
+            throw new \RuntimeException('Telegram rejected the request: ' . $this->safeError($description));
+        }
+        if ($error) {
+            throw new \RuntimeException('Telegram request failed: ' . $this->safeError($errorMessage));
+        }
+        if (!is_object($response) || !property_exists($response, 'ok') || $response->ok !== true) {
+            throw new \RuntimeException('Telegram returned an invalid response');
+        }
+
         return $response;
+    }
+
+    private function escapeMarkdownV2(string $text): string
+    {
+        return preg_replace('/([_*\[\]()~`>#+\-=|{}.!\\\\])/', '\\\\$1', $text);
+    }
+
+    private function safeError($message): string
+    {
+        $message = str_replace($this->token, '[redacted]', (string)$message);
+        $message = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $message);
+        return function_exists('mb_substr')
+            ? mb_substr($message, 0, 300, 'UTF-8')
+            : substr($message, 0, 300);
     }
 
     public function sendMessageWithAdmin($message, $isStaff = false)

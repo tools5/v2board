@@ -17,6 +17,7 @@ class OrderHandleJob implements ShouldQueue
 
     public $tries = 3;
     public $timeout = 5;
+    public $backoff = [5, 30, 120];
     /**
      * Create a new job instance.
      *
@@ -41,14 +42,16 @@ class OrderHandleJob implements ShouldQueue
         if (!$order) return;
 
         $orderService = new OrderService($order);
-        switch ($order->status) {
-            case 0:
-                if ($order->created_at <= (time() - 3600 * 2)) {
+        switch ((int) $order->status) {
+            case OrderService::STATUS_PENDING:
+                if ($order->payment_id === null && $order->created_at <= (time() - 3600 * 2)) {
                     $orderService->cancel();
                 }
                 break;
-            case 1:
-                $orderService->open();
+            case OrderService::STATUS_PROCESSING:
+                if (!$orderService->open()) {
+                    throw new \RuntimeException('Unable to process paid order ' . $this->tradeNo);
+                }
                 break;
         }
     }

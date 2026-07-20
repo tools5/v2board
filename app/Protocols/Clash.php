@@ -2,6 +2,8 @@
 
 namespace App\Protocols;
 
+use App\Support\ConfiguredUrl;
+use App\Support\SubscriptionHeaders;
 use phpDocumentor\Reflection\Types\Self_;
 use Symfony\Component\Yaml\Yaml;
 
@@ -21,11 +23,14 @@ class Clash
     {
         $servers = $this->servers;
         $user = $this->user;
-        $appName = config('v2board.app_name', 'V2Board');
-        header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
-        header('profile-update-interval: 24');
-        header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName));
-        header("profile-web-page-url:" . config('v2board.app_url'));
+        $appName = SubscriptionHeaders::applicationName();
+        SubscriptionHeaders::send('subscription-userinfo', SubscriptionHeaders::userInfo($user));
+        SubscriptionHeaders::send('profile-update-interval', '24');
+        SubscriptionHeaders::send('Content-Disposition', SubscriptionHeaders::contentDisposition($appName));
+        $appUrl = ConfiguredUrl::applicationUrl();
+        if ($appUrl !== '') {
+            SubscriptionHeaders::send('profile-web-page-url', $appUrl);
+        }
         $defaultConfig = base_path() . '/resources/rules/default.clash.yaml';
         $customConfig = base_path() . '/resources/rules/custom.clash.yaml';
         if (\File::exists($customConfig)) {
@@ -91,7 +96,7 @@ class Clash
         //}
 
         $yaml = Yaml::dump($config, 2, 4, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
-        $yaml = str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
+        $yaml = str_replace('$app_name', $appName, $yaml);
         return $yaml;
     }
 

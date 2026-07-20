@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Jobs\OrderHandleJob;
 use Illuminate\Console\Command;
 use App\Models\Order;
+use App\Services\OrderService;
 
 class CheckOrder extends Command
 {
@@ -40,11 +41,20 @@ class CheckOrder extends Command
     public function handle()
     {
         ini_set('memory_limit', -1);
-        $orders = Order::whereIn('status', [0, 1])
-            ->orderBy('created_at', 'ASC')
-            ->get();
-        foreach ($orders as $order) {
-            OrderHandleJob::dispatch($order->trade_no);
-        }
+        Order::where(function ($query) {
+            $query->where('status', OrderService::STATUS_PROCESSING)
+                ->orWhere(function ($query) {
+                    $query->where('status', OrderService::STATUS_PENDING)
+                        ->whereNull('payment_id')
+                        ->where('created_at', '<=', time() - 3600 * 2);
+                });
+        })
+            ->select(['id', 'trade_no'])
+            ->orderBy('id')
+            ->chunkById(200, function ($orders) {
+                foreach ($orders as $order) {
+                    OrderHandleJob::dispatch($order->trade_no);
+                }
+            });
     }
 }

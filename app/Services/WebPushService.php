@@ -2,13 +2,12 @@
 
 namespace App\Services;
 
+use App\Exceptions\WebPushEndpointResolutionException;
 use App\Models\Notice;
 use App\Models\User;
 use App\Models\WebPushSubscription as WebPushSubscriptionModel;
+use App\Support\ConfiguredUrl;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Minishlink\WebPush\Subscription;
 use Minishlink\WebPush\VAPID;
@@ -16,13 +15,49 @@ use Minishlink\WebPush\WebPush;
 
 class WebPushService
 {
+    private const SETTINGS_FILE = 'app/webpush-settings.json';
+
+    private const DEFAULT_ENDPOINT_HOSTS = [
+        'fcm.googleapis.com',
+        'android.googleapis.com',
+        '*.push.services.mozilla.com',
+        '*.notify.windows.com',
+        '*.push.apple.com',
+    ];
+
+    private $endpointSafetyCache = [];
+
     /**
      * Resolved runtime settings.
      * Priority: admin-saved v2board.php values (when present) > .env / config/webpush.php.
      */
     public function getSettings()
     {
-        $board = config('v2board', []);
+        $board = $this->loadBoardConfig();
+        $stored = $this->loadStoredSettings();
+        $storedKeyMap = [
+            'enabled' => 'web_push_enabled',
+            'vapid_subject' => 'web_push_vapid_subject',
+            'public_key' => 'web_push_public_key',
+            'private_key' => 'web_push_private_key',
+            'ttl' => 'web_push_ttl',
+            'urgency' => 'web_push_urgency',
+            'batch_size' => 'web_push_batch_size',
+            'request_timeout' => 'web_push_request_timeout',
+            'proxy' => 'web_push_proxy',
+            'ca_bundle' => 'web_push_ca_bundle',
+            'remind_expire' => 'web_push_remind_expire',
+            'remind_traffic' => 'web_push_remind_traffic',
+            'remind_expire_days' => 'web_push_remind_expire_days',
+            'remind_traffic_percent' => 'web_push_remind_traffic_percent',
+            'remind_expire_url' => 'web_push_remind_expire_url',
+            'remind_traffic_url' => 'web_push_remind_traffic_url',
+        ];
+        foreach ($storedKeyMap as $storedKey => $boardKey) {
+            if (array_key_exists($storedKey, $stored)) {
+                $board[$boardKey] = $stored[$storedKey];
+            }
+        }
         $envConfig = config('webpush', []);
 
         $enabled = $this->resolveBool(
@@ -148,7 +183,7 @@ class WebPushService
             'remind_traffic_percent' => $trafficPercent,
             'remind_expire_url' => $expireUrl,
             'remind_traffic_url' => $trafficUrl,
-            'source' => $this->detectConfigSource($board),
+            'source' => !empty($stored) ? 'storage' : $this->detectConfigSource($board),
         ];
     }
 
@@ -163,7 +198,7 @@ class WebPushService
     }
 
     /**
-     * Persist Web Push settings into config/v2board.php (same path as system settings).
+     * Persist Web Push settings independently from the generated application config.
      */
     public function saveSettings(array $input)
     {
@@ -181,8 +216,12 @@ class WebPushService
         $publicKey = array_key_exists('public_key', $input)
             ? trim((string)$input['public_key'])
             : (string)$current['public_key'];
-        $privateKey = array_key_exists('private_key', $input)
+        $privateKeyInput = array_key_exists('private_key', $input)
             ? trim((string)$input['private_key'])
+            : '';
+        // An empty value from the admin form means "keep the existing secret".
+        $privateKey = $privateKeyInput !== ''
+            ? $privateKeyInput
             : (string)$current['private_key'];
 
         $ttl = array_key_exists('ttl', $input)
@@ -232,78 +271,38 @@ class WebPushService
             ? trim((string)$input['remind_traffic_url'])
             : (string)$current['remind_traffic_url'];
 
-        if ($enabled) {
-            if ($subject === '') {
-                throw new \InvalidArgumentException('VAPID Subject 不能为空（https://域名 或 mailto:邮箱）');
-            }
-            if ($publicKey === '' || $privateKey === '') {
-                throw new \InvalidArgumentException('启用推送前请填写或生成 VAPID 公钥与私钥');
-            }
+        if ($subject !== '') {
+            $this->assertValidVapidSubject($subject);
+        }
+        if (($publicKey === '') xor ($privateKey === '')) {
+            throw new \InvalidArgumentException('VAPID 公钥与私钥必须同时配置');
+        }
+        if ($publicKey !== '' && $privateKey !== '') {
+            $this->assertValidVapidKeyPair($subject, $publicKey, $privateKey);
+        }
+        if ($enabled && ($subject === '' || $publicKey === '' || $privateKey === '')) {
+            throw new \InvalidArgumentException('启用推送前请填写 Subject，或生成 VAPID 密钥');
         }
 
-        $config = config('v2board');
-        if (!is_array($config)) {
-            $config = [];
-        }
-
-        $config['web_push_enabled'] = $enabled ? 1 : 0;
-        $config['web_push_vapid_subject'] = $subject;
-        $config['web_push_public_key'] = $publicKey;
-        $config['web_push_private_key'] = $privateKey;
-        $config['web_push_ttl'] = $ttl;
-        $config['web_push_urgency'] = $urgency;
-        $config['web_push_batch_size'] = $batchSize;
-        $config['web_push_request_timeout'] = $requestTimeout;
-        $config['web_push_proxy'] = $proxy !== '' ? $proxy : null;
-        $config['web_push_ca_bundle'] = $caBundle !== '' ? $caBundle : null;
-        $config['web_push_remind_expire'] = $remindExpire ? 1 : 0;
-        $config['web_push_remind_traffic'] = $remindTraffic ? 1 : 0;
-        $config['web_push_remind_expire_days'] = implode(',', $expireDays);
-        $config['web_push_remind_traffic_percent'] = $trafficPercent;
-        $config['web_push_remind_expire_url'] = $expireUrl !== '' ? $expireUrl : null;
-        $config['web_push_remind_traffic_url'] = $trafficUrl !== '' ? $trafficUrl : null;
-
-        $configPath = base_path('config/v2board.php');
-        $exported = var_export($config, true);
-        $phpContent = "<?php\n return $exported ;";
-
-        // Prefer direct write so we can surface permission errors clearly.
-        $bytesWritten = @file_put_contents($configPath, $phpContent, LOCK_EX);
-        if ($bytesWritten === false) {
-            $ownerHint = '';
-            if (function_exists('posix_getpwuid') && is_file($configPath)) {
-                $owner = @posix_getpwuid(@fileowner($configPath));
-                if (is_array($owner) && !empty($owner['name'])) {
-                    $ownerHint = ' 当前文件所有者: ' . $owner['name'] . '。';
-                }
-            }
-            throw new \RuntimeException(
-                '写入 config/v2board.php 失败，请检查权限（通常需 www 可写）。' . $ownerHint .
-                ' 可执行: chown www:www config/v2board.php && chmod 664 config/v2board.php'
-            );
-        }
-
-        if (function_exists('opcache_reset')) {
-            @opcache_reset();
-        }
-
-        // Refresh runtime config first; never let cache rebuild fail the save.
-        config([
-            'v2board' => $config,
+        $this->writeStoredSettings([
+            'enabled' => $enabled,
+            'vapid_subject' => $subject,
+            'public_key' => $publicKey,
+            'private_key' => $privateKey,
+            'ttl' => $ttl,
+            'urgency' => $urgency,
+            'batch_size' => $batchSize,
+            'request_timeout' => $requestTimeout,
+            'proxy' => $proxy !== '' ? $proxy : null,
+            'ca_bundle' => $caBundle !== '' ? $caBundle : null,
+            'remind_expire' => $remindExpire,
+            'remind_traffic' => $remindTraffic,
+            'remind_expire_days' => implode(',', $expireDays),
+            'remind_traffic_percent' => $trafficPercent,
+            'remind_expire_url' => $expireUrl !== '' ? $expireUrl : null,
+            'remind_traffic_url' => $trafficUrl !== '' ? $trafficUrl : null,
         ]);
 
-        try {
-            // Prefer clear over cache: config:cache needs full env and may fail on Redis/predis.
-            Artisan::call('config:clear');
-        } catch (\Throwable $error) {
-            Log::warning('Web Push config:clear failed after save', [
-                'reason' => $error->getMessage(),
-            ]);
-        }
-
-        // Soft-signal webman to reload if present; do not fail the request.
-        // IMPORTANT: never SIGTERM the webman master from an HTTP request — that causes 502.
-        // Operators should restart webman manually after bulk config changes if needed.
         return $this->getSettings();
     }
 
@@ -312,9 +311,7 @@ class WebPushService
      */
     public function generateVapidKeys()
     {
-        $subject = $this->normalizeVapidSubject(
-            (string)config('v2board.app_url', config('app.url', ''))
-        );
+        $subject = $this->normalizeVapidSubject(ConfiguredUrl::applicationUrl());
 
         if (class_exists(VAPID::class)) {
             try {
@@ -325,10 +322,8 @@ class WebPushService
                     'vapid_subject' => $subject,
                 ];
             } catch (\Throwable $error) {
-                // Fall through to OpenSSL generator below.
-                Log::warning('VAPID library key generation failed, falling back to OpenSSL', [
-                    'reason' => $error->getMessage(),
-                ]);
+                // Fall through to the OpenSSL generator below. Some Windows PHP
+                // packages expose OpenSSL but point it at a non-existent config.
             }
         }
 
@@ -346,10 +341,11 @@ class WebPushService
             );
         }
 
-        $privateKeyResource = openssl_pkey_new([
+        $options = [
             'curve_name' => 'prime256v1',
             'private_key_type' => OPENSSL_KEYTYPE_EC,
-        ]);
+        ];
+        $privateKeyResource = $this->createOpenSslEcKey($options);
         if ($privateKeyResource === false) {
             throw new \RuntimeException(
                 'OpenSSL 无法生成 EC 密钥。请安装扩展后执行：composer require minishlink/web-push:^7.0'
@@ -361,8 +357,10 @@ class WebPushService
             throw new \RuntimeException('OpenSSL 密钥详情读取失败，请安装 minishlink/web-push');
         }
 
-        $publicRaw = "\x04" . $details['ec']['x'] . $details['ec']['y'];
-        $privateRaw = $details['ec']['d'];
+        $x = $this->normalizeP256Field($details['ec']['x'], 'x');
+        $y = $this->normalizeP256Field($details['ec']['y'], 'y');
+        $privateRaw = $this->normalizeP256Field($details['ec']['d'], 'd');
+        $publicRaw = "\x04" . $x . $y;
 
         return [
             'public_key' => $this->base64UrlEncode($publicRaw),
@@ -371,14 +369,78 @@ class WebPushService
         ];
     }
 
+    /**
+     * Try the system OpenSSL configuration first, then common PHP package paths.
+     */
+    private function createOpenSslEcKey(array $options)
+    {
+        $attempts = [$options];
+        foreach ($this->openSslConfigCandidates() as $configPath) {
+            $attempts[] = ['config' => $configPath] + $options;
+        }
+
+        foreach ($attempts as $attempt) {
+            try {
+                $key = @openssl_pkey_new($attempt);
+            } catch (\Throwable $error) {
+                $key = false;
+            }
+            if ($key !== false) {
+                return $key;
+            }
+        }
+
+        return false;
+    }
+
+    private function openSslConfigCandidates()
+    {
+        $phpDirectory = dirname(PHP_BINARY);
+        $phpIni = php_ini_loaded_file();
+        $phpIniDirectory = is_string($phpIni) && $phpIni !== ''
+            ? dirname($phpIni)
+            : $phpDirectory;
+        $candidates = [
+            getenv('OPENSSL_CONF'),
+            getenv('SSLEAY_CONF'),
+            $phpDirectory . DIRECTORY_SEPARATOR . 'extras' . DIRECTORY_SEPARATOR . 'ssl' . DIRECTORY_SEPARATOR . 'openssl.cnf',
+            $phpDirectory . DIRECTORY_SEPARATOR . 'ssl' . DIRECTORY_SEPARATOR . 'openssl.cnf',
+            $phpIniDirectory . DIRECTORY_SEPARATOR . 'extras' . DIRECTORY_SEPARATOR . 'ssl' . DIRECTORY_SEPARATOR . 'openssl.cnf',
+            '/etc/ssl/openssl.cnf',
+            '/usr/lib/ssl/openssl.cnf',
+        ];
+
+        $valid = [];
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate) || $candidate === '' || !is_file($candidate)) {
+                continue;
+            }
+            $realPath = realpath($candidate);
+            if ($realPath !== false) {
+                $valid[$realPath] = $realPath;
+            }
+        }
+
+        return array_values($valid);
+    }
+
     private function base64UrlEncode($binary)
     {
         return rtrim(strtr(base64_encode($binary), '+/', '-_'), '=');
     }
 
+    private function normalizeP256Field($value, $name)
+    {
+        if (!is_string($value) || strlen($value) > 32) {
+            throw new \RuntimeException('OpenSSL 返回了无效的 P-256 ' . $name . ' 字段');
+        }
+
+        return str_pad($value, 32, "\0", STR_PAD_LEFT);
+    }
+
     public function defaultIconUrl()
     {
-        $logo = trim((string)config('v2board.logo', ''));
+        $logo = ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.logo', ''));
         if ($logo !== '') {
             return $this->absoluteAssetUrl($logo);
         }
@@ -388,8 +450,7 @@ class WebPushService
 
     public function defaultClickUrl()
     {
-        $baseUrl = rtrim((string)config('v2board.app_url', config('app.url', '')), '/');
-        return $baseUrl . '/#/dashboard';
+        return ConfiguredUrl::applicationPathUrl('/#/dashboard');
     }
 
     /**
@@ -403,25 +464,383 @@ class WebPushService
             return '';
         }
 
-        if (preg_match('#^https?://#i', $url)) {
-            return $url;
+        $absoluteParts = parse_url($url);
+        if (is_array($absoluteParts) && isset($absoluteParts['scheme'])) {
+            return ConfiguredUrl::normalizeExternalHttpUrl($url);
         }
 
-        $baseUrl = rtrim((string)config('v2board.app_url', config('app.url', '')), '/');
-        if ($baseUrl === '') {
-            return $url;
-        }
+        $baseUrl = rtrim(ConfiguredUrl::applicationUrl(), '/');
 
         if (strpos($url, '//') === 0) {
             $scheme = parse_url($baseUrl, PHP_URL_SCHEME) ?: 'https';
-            return $scheme . ':' . $url;
+            if (!in_array(strtolower((string)$scheme), ['http', 'https'], true)) {
+                $scheme = 'https';
+            }
+
+            return ConfiguredUrl::normalizeExternalHttpUrl($scheme . ':' . $url);
         }
 
-        if ($url[0] !== '/') {
-            $url = '/' . $url;
+        return ConfiguredUrl::applicationPathUrl($url);
+    }
+
+    private function loadBoardConfig()
+    {
+        $config = config('v2board', []);
+        if (!is_array($config)) {
+            $config = [];
         }
 
-        return $baseUrl . $url;
+        if (app()->environment('testing')) {
+            return $config;
+        }
+
+        $path = base_path('config/v2board.php');
+        if (!is_file($path)) {
+            return $config;
+        }
+
+        try {
+            clearstatcache(true, $path);
+            $diskConfig = (static function ($configPath) {
+                return require $configPath;
+            })($path);
+            if (is_array($diskConfig)) {
+                return $diskConfig;
+            }
+        } catch (\Throwable $error) {
+            Log::warning('Unable to reload v2board config for Web Push', [
+                'reason' => $error->getMessage(),
+            ]);
+        }
+
+        return $config;
+    }
+
+    private function loadStoredSettings()
+    {
+        $path = storage_path(self::SETTINGS_FILE);
+        $lockPath = $path . '.lock';
+        $lock = @fopen($lockPath, 'c+');
+
+        try {
+            if ($lock !== false && !flock($lock, LOCK_SH)) {
+                throw new \RuntimeException('lock failed');
+            }
+            if (!is_file($path)) {
+                return [];
+            }
+            $contents = file_get_contents($path);
+            if ($contents === false) {
+                throw new \RuntimeException('read failed');
+            }
+            $settings = json_decode($contents, true, 32);
+            if (!is_array($settings) || json_last_error() !== JSON_ERROR_NONE) {
+                throw new \RuntimeException('invalid JSON');
+            }
+            return $settings;
+        } catch (\Throwable $error) {
+            Log::error('Unable to read stored Web Push settings', [
+                'reason' => $error->getMessage(),
+            ]);
+            return [];
+        } finally {
+            if ($lock !== false) {
+                @flock($lock, LOCK_UN);
+                fclose($lock);
+            }
+        }
+    }
+
+    private function writeStoredSettings(array $settings)
+    {
+        $path = storage_path(self::SETTINGS_FILE);
+        $directory = dirname($path);
+        if (!is_dir($directory) && !@mkdir($directory, 0750, true) && !is_dir($directory)) {
+            throw new \RuntimeException('Web Push 配置目录不可创建，请检查 storage 写入权限');
+        }
+
+        $lockPath = $path . '.lock';
+        $lock = @fopen($lockPath, 'c+');
+        if ($lock === false) {
+            throw new \RuntimeException('Web Push 配置锁不可创建，请检查 storage 写入权限');
+        }
+
+        $tempPath = null;
+        $backupPath = null;
+        try {
+            if (!flock($lock, LOCK_EX)) {
+                throw new \RuntimeException('无法锁定 Web Push 配置文件');
+            }
+
+            $json = json_encode(
+                $settings,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
+            if ($json === false) {
+                throw new \RuntimeException('Web Push 配置编码失败');
+            }
+            $json .= PHP_EOL;
+
+            $tempPath = tempnam($directory, '.webpush-');
+            if ($tempPath === false) {
+                throw new \RuntimeException('无法创建 Web Push 临时配置文件');
+            }
+            if (file_put_contents($tempPath, $json, LOCK_EX) !== strlen($json)) {
+                throw new \RuntimeException('Web Push 临时配置写入失败');
+            }
+            @chmod($tempPath, 0600);
+
+            if (is_file($path)) {
+                $backupPath = $path . '.backup-' . bin2hex(random_bytes(6));
+                if (!@rename($path, $backupPath)) {
+                    throw new \RuntimeException('Web Push 旧配置无法锁定替换');
+                }
+                @chmod($backupPath, 0600);
+            }
+
+            if (!@rename($tempPath, $path)) {
+                if ($backupPath !== null && is_file($backupPath)) {
+                    @rename($backupPath, $path);
+                    $backupPath = null;
+                }
+                throw new \RuntimeException('Web Push 配置原子替换失败');
+            }
+            $tempPath = null;
+            if ($backupPath !== null) {
+                @unlink($backupPath);
+                $backupPath = null;
+            }
+            clearstatcache(true, $path);
+        } finally {
+            if ($tempPath !== null && is_file($tempPath)) {
+                @unlink($tempPath);
+            }
+            if ($backupPath !== null && is_file($backupPath)) {
+                if (!is_file($path)) {
+                    @rename($backupPath, $path);
+                } else {
+                    @unlink($backupPath);
+                }
+            }
+            @flock($lock, LOCK_UN);
+            fclose($lock);
+            @chmod($lockPath, 0600);
+        }
+    }
+
+    private function assertValidVapidSubject($subject)
+    {
+        $subject = trim((string)$subject);
+        if (stripos($subject, 'mailto:') === 0) {
+            $email = substr($subject, 7);
+            if (!preg_match('/^[^@\s]+@[^@\s]+$/', $email)) {
+                throw new \InvalidArgumentException('VAPID Subject 的邮箱格式无效');
+            }
+            return;
+        }
+
+        $parts = parse_url($subject);
+        if (!is_array($parts)
+            || strtolower((string)($parts['scheme'] ?? '')) !== 'https'
+            || empty($parts['host'])
+            || isset($parts['user'])
+            || isset($parts['pass'])
+        ) {
+            throw new \InvalidArgumentException('VAPID Subject 必须是 https:// 地址或 mailto:邮箱');
+        }
+    }
+
+    private function assertValidVapidKeyPair($subject, $publicKey, $privateKey)
+    {
+        $publicRaw = $this->base64UrlDecode($publicKey);
+        $privateRaw = $this->base64UrlDecode($privateKey);
+        if ($publicRaw === false || strlen($publicRaw) !== 65 || $publicRaw[0] !== "\x04") {
+            throw new \InvalidArgumentException('VAPID 公钥格式无效，应为 65 字节 P-256 公钥');
+        }
+        if ($privateRaw === false || strlen($privateRaw) !== 32) {
+            throw new \InvalidArgumentException('VAPID 私钥格式无效，应为 32 字节 P-256 私钥');
+        }
+
+        if (class_exists(VAPID::class)) {
+            try {
+                VAPID::validate([
+                    'subject' => (string)$subject,
+                    'publicKey' => (string)$publicKey,
+                    'privateKey' => (string)$privateKey,
+                ]);
+            } catch (\Throwable $error) {
+                throw new \InvalidArgumentException('VAPID 密钥校验失败');
+            }
+        }
+    }
+
+    private function base64UrlDecode($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '' || !preg_match('/^[A-Za-z0-9_-]+={0,2}$/', $value)) {
+            return false;
+        }
+
+        $value = rtrim($value, '=');
+        if (strlen($value) % 4 === 1) {
+            return false;
+        }
+
+        $remainder = strlen($value) % 4;
+        if ($remainder > 0) {
+            $value .= str_repeat('=', 4 - $remainder);
+        }
+
+        return base64_decode(strtr($value, '-_', '+/'), true);
+    }
+
+    public function assertValidSubscription($endpoint, $publicKey, $authToken)
+    {
+        $this->assertValidSubscriptionEndpoint($endpoint);
+
+        $publicRaw = $this->base64UrlDecode($publicKey);
+        if ($publicRaw === false || strlen($publicRaw) !== 65 || $publicRaw[0] !== "\x04") {
+            throw new \InvalidArgumentException('浏览器推送公钥格式无效');
+        }
+
+        $authRaw = $this->base64UrlDecode($authToken);
+        if ($authRaw === false || strlen($authRaw) !== 16) {
+            throw new \InvalidArgumentException('浏览器推送认证密钥格式无效');
+        }
+    }
+
+    public function assertValidSubscriptionEndpoint($endpoint)
+    {
+        $endpoint = trim((string)$endpoint);
+        $parts = parse_url($endpoint);
+        if (!is_array($parts)
+            || strtolower((string)($parts['scheme'] ?? '')) !== 'https'
+            || empty($parts['host'])
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || isset($parts['fragment'])
+            || (isset($parts['port']) && (int)$parts['port'] !== 443)
+        ) {
+            throw new \InvalidArgumentException('推送订阅地址无效');
+        }
+
+        $host = strtolower(rtrim((string)$parts['host'], '.'));
+        if (!$this->isAllowedEndpointHost($host)) {
+            throw new \InvalidArgumentException('推送订阅服务不受信任');
+        }
+
+        if (!array_key_exists($host, $this->endpointSafetyCache)) {
+            $addresses = $this->resolveEndpointHostAddresses($host);
+            if (empty($addresses)) {
+                $this->endpointSafetyCache[$host] = 'unresolved';
+            } elseif (count(array_filter($addresses, [$this, 'isPublicIpAddress'])) !== count($addresses)) {
+                $this->endpointSafetyCache[$host] = 'unsafe';
+            } else {
+                $this->endpointSafetyCache[$host] = 'public';
+            }
+        }
+
+        if ($this->endpointSafetyCache[$host] === 'unresolved') {
+            throw new WebPushEndpointResolutionException('推送订阅服务地址暂时无法解析');
+        }
+        if ($this->endpointSafetyCache[$host] !== 'public') {
+            throw new \InvalidArgumentException('推送订阅服务地址解析失败');
+        }
+    }
+
+    protected function resolveEndpointHostAddresses($host, $depth = 0, array &$visited = [])
+    {
+        $host = strtolower(rtrim((string)$host, '.'));
+        if ($host === '' || $depth > 5 || isset($visited[$host])) {
+            return [];
+        }
+        $visited[$host] = true;
+
+        $addresses = [];
+        $records = function_exists('dns_get_record')
+            ? @dns_get_record($host, DNS_A | DNS_AAAA | DNS_CNAME)
+            : false;
+        if (is_array($records)) {
+            foreach ($records as $record) {
+                if (!empty($record['ip'])) {
+                    $addresses[] = (string)$record['ip'];
+                }
+                if (!empty($record['ipv6'])) {
+                    $addresses[] = (string)$record['ipv6'];
+                }
+                if (!empty($record['target'])) {
+                    $addresses = array_merge(
+                        $addresses,
+                        $this->resolveEndpointHostAddresses($record['target'], $depth + 1, $visited)
+                    );
+                }
+            }
+        }
+
+        if (empty($addresses) && function_exists('gethostbynamel')) {
+            $ipv4Addresses = @gethostbynamel($host);
+            if (is_array($ipv4Addresses)) {
+                $addresses = array_merge($addresses, $ipv4Addresses);
+            }
+        }
+
+        return array_values(array_unique(array_filter($addresses)));
+    }
+
+    protected function getAllowedEndpointHosts()
+    {
+        $configured = config('webpush.allowed_endpoint_hosts', []);
+        if (is_string($configured)) {
+            $configured = preg_split('/[\s,]+/', $configured, -1, PREG_SPLIT_NO_EMPTY);
+        }
+        if (!is_array($configured)) {
+            $configured = [];
+        }
+
+        return array_values(array_unique(array_merge(self::DEFAULT_ENDPOINT_HOSTS, array_map(function ($host) {
+            return strtolower(rtrim(trim((string)$host), '.'));
+        }, $configured))));
+    }
+
+    private function isAllowedEndpointHost($host)
+    {
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        if (!preg_match('/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i', $host)) {
+            return false;
+        }
+
+        foreach ($this->getAllowedEndpointHosts() as $pattern) {
+            if ($pattern === $host) {
+                return true;
+            }
+            if (strpos($pattern, '*.') === 0) {
+                $suffix = substr($pattern, 1);
+                if (strlen($host) > strlen($suffix) && substr($host, -strlen($suffix)) === $suffix) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    protected function isPublicIpAddress($address)
+    {
+        $address = trim((string)$address);
+        if (stripos($address, '::ffff:') === 0) {
+            $mapped = substr($address, 7);
+            if (filter_var($mapped, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                $address = $mapped;
+            }
+        }
+
+        return filter_var(
+            $address,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        ) !== false;
     }
 
     private function resolveString(array $board, $key, $fallback)
@@ -468,7 +887,7 @@ class WebPushService
     {
         $subject = trim((string)$subject);
         if ($subject === '') {
-            $appUrl = trim((string)config('v2board.app_url', config('app.url', '')));
+            $appUrl = ConfiguredUrl::applicationUrl();
             if (preg_match('/^https:\/\//i', $appUrl)) {
                 return $appUrl;
             }
@@ -549,7 +968,7 @@ class WebPushService
         $body = trim((string)($input['body'] ?? ''));
         $icon = $this->absoluteAssetUrl(trim((string)($input['icon'] ?? '')));
         $image = $this->absoluteAssetUrl(trim((string)($input['image'] ?? '')));
-        $url = trim((string)($input['url'] ?? ''));
+        $url = $this->normalizeNotificationUrl((string)($input['url'] ?? ''));
         $tag = trim((string)($input['tag'] ?? ''));
         $badge = $this->absoluteAssetUrl(trim((string)($input['badge'] ?? '')));
 
@@ -585,7 +1004,7 @@ class WebPushService
                 $actions[] = [
                     'action' => mb_substr($action, 0, 64),
                     'title' => mb_substr($actionTitle, 0, 64),
-                    'url' => trim((string)($actionItem['url'] ?? $url)),
+                    'url' => $this->normalizeNotificationUrl((string)($actionItem['url'] ?? $url)),
                 ];
                 if (count($actions) >= 2) {
                     break;
@@ -622,6 +1041,29 @@ class WebPushService
             'renotify' => !empty($input['renotify']),
             'requireInteraction' => !empty($input['require_interaction']),
         ];
+    }
+
+    private function normalizeNotificationUrl($url)
+    {
+        $url = trim((string)$url);
+        if ($url === '' || strlen($url) > 2048 || preg_match('/[\x00-\x20\x7F]/', $url)
+            || strpos($url, '\\') !== false) {
+            return $this->defaultClickUrl();
+        }
+
+        $parts = parse_url($url);
+        if (is_array($parts) && isset($parts['scheme'])) {
+            $scheme = strtolower((string)$parts['scheme']);
+            if (!in_array($scheme, ['http', 'https'], true) || empty($parts['host'])
+                || isset($parts['user']) || isset($parts['pass'])) {
+                return $this->defaultClickUrl();
+            }
+        } elseif (strpos($url, '//') === 0) {
+            $baseScheme = parse_url($this->defaultClickUrl(), PHP_URL_SCHEME) ?: 'https';
+            $url = $baseScheme . ':' . $url;
+        }
+
+        return $url;
     }
 
     public function encodePayload(array $payload)
@@ -706,6 +1148,29 @@ class WebPushService
             foreach ($subscriptions as $storedSubscription) {
                 $stats['total']++;
                 try {
+                    $service->assertValidSubscription(
+                        $storedSubscription->endpoint,
+                        $storedSubscription->public_key,
+                        $storedSubscription->auth_token
+                    );
+                } catch (WebPushEndpointResolutionException $error) {
+                    $stats['failed']++;
+                    Log::warning('Web push endpoint resolution failed; subscription retained', [
+                        'subscription_id' => $storedSubscription->id,
+                        'reason' => $error->getMessage(),
+                    ]);
+                    continue;
+                } catch (\InvalidArgumentException $error) {
+                    $stats['failed']++;
+                    $storedSubscription->delete();
+                    Log::warning('Invalid web push subscription removed', [
+                        'subscription_id' => $storedSubscription->id,
+                        'reason' => $error->getMessage(),
+                    ]);
+                    continue;
+                }
+
+                try {
                     $subscription = Subscription::create([
                         'endpoint' => $storedSubscription->endpoint,
                         'publicKey' => $storedSubscription->public_key,
@@ -721,8 +1186,7 @@ class WebPushService
                     $webPush->queueNotification($subscription, $encodedPayload, $options);
                 } catch (\Throwable $error) {
                     $stats['failed']++;
-                    $storedSubscription->delete();
-                    Log::warning('Invalid web push subscription removed', [
+                    Log::warning('Web push subscription could not be queued; subscription retained', [
                         'subscription_id' => $storedSubscription->id,
                         'reason' => $error->getMessage(),
                     ]);
@@ -859,6 +1323,7 @@ class WebPushService
 
         $settings = $this->getSettings();
         $clientOptions = [];
+        $clientOptions['allow_redirects'] = false;
         $proxy = trim((string)$settings['proxy']);
         if ($proxy !== '') {
             $clientOptions['proxy'] = $proxy;

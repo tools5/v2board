@@ -20,14 +20,34 @@ class TelegramController extends Controller
 
     public function webhook(Request $request)
     {
-        if ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
+        if (!$this->isAuthorizedWebhookRequest($request)) {
             abort(401);
         }
 
         $this->telegramService = new TelegramService();
-        $this->formatMessage($request->input());
-        $this->formatChatJoinRequest($request->input());
+        $payload = $request->input();
+        $this->formatMessage($payload);
+        $this->formatChatJoinRequest($payload);
         $this->handle();
+
+        return response()->noContent();
+    }
+
+    private function isAuthorizedWebhookRequest(Request $request): bool
+    {
+        $secret = trim((string)config('v2board.telegram_webhook_secret', ''));
+        if ($secret !== '') {
+            $received = (string)$request->header('X-Telegram-Bot-Api-Secret-Token', '');
+            return $received !== '' && hash_equals($secret, $received);
+        }
+
+        // Backward compatibility for existing webhook URLs. It is disabled once a
+        // Telegram secret token has been provisioned by the admin endpoint.
+        $botToken = trim((string)config('v2board.telegram_bot_token', ''));
+        $legacyToken = (string)$request->query('access_token', '');
+        return $botToken !== ''
+            && $legacyToken !== ''
+            && hash_equals(md5($botToken), $legacyToken);
     }
 
     public function handle()
@@ -63,7 +83,7 @@ class TelegramController extends Controller
                     return;
                 }
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->telegramService->sendMessage($msg->chat_id, $e->getMessage());
         }
     }
@@ -76,20 +96,23 @@ class TelegramController extends Controller
 
     private function formatMessage(array $data)
     {
-        if (!isset($data['message'])) return;
-        if (!isset($data['message']['text'])) return;
+        if (!isset($data['message']) || !is_array($data['message'])) return;
+        $message = $data['message'];
+        if (!isset($message['text'], $message['chat']['id'], $message['chat']['type'], $message['message_id'])) return;
+        if (!is_string($message['text'])) return;
+
         $obj = new \StdClass();
-        $text = explode(' ', $data['message']['text']);
+        $text = explode(' ', $message['text']);
         $obj->command = $text[0];
         $obj->args = array_slice($text, 1);
-        $obj->chat_id = $data['message']['chat']['id'];
-        $obj->message_id = $data['message']['message_id'];
+        $obj->chat_id = $message['chat']['id'];
+        $obj->message_id = $message['message_id'];
         $obj->message_type = 'message';
-        $obj->text = $data['message']['text'];
-        $obj->is_private = $data['message']['chat']['type'] === 'private';
-        if (isset($data['message']['reply_to_message']['text'])) {
+        $obj->text = $message['text'];
+        $obj->is_private = $message['chat']['type'] === 'private';
+        if (isset($message['reply_to_message']['text']) && is_string($message['reply_to_message']['text'])) {
             $obj->message_type = 'reply_message';
-            $obj->reply_text = $data['message']['reply_to_message']['text'];
+            $obj->reply_text = $message['reply_to_message']['text'];
         }
         $this->msg = $obj;
     }

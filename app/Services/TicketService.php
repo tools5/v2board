@@ -6,77 +6,99 @@ use App\Jobs\SendEmailJob;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Support\ConfiguredUrl;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class TicketService {
     public function reply($ticket, $message, $userId)
     {
-        DB::beginTransaction();
-        $ticketMessage = TicketMessage::create([
-            'user_id' => $userId,
-            'ticket_id' => $ticket->id,
-            'message' => $message
-        ]);
-        if ($userId !== $ticket->user_id) {
-            $ticket->reply_status = 1;
-        } else {
-            $ticket->reply_status = 0;
-        }
-        if (!$ticketMessage || !$ticket->save()) {
-            DB::rollback();
+        try {
+            return DB::transaction(function () use ($ticket, $message, $userId) {
+                $lockedTicket = Ticket::where('id', $ticket->id)->lockForUpdate()->first();
+                if (!$lockedTicket || (int)$lockedTicket->status !== 0) {
+                    return false;
+                }
+
+                $lastMessage = TicketMessage::where('ticket_id', $lockedTicket->id)
+                    ->orderBy('id', 'DESC')
+                    ->first();
+                if ($lastMessage && (int)$lastMessage->user_id === (int)$userId) {
+                    return false;
+                }
+
+                $ticketMessage = TicketMessage::create([
+                    'user_id' => $userId,
+                    'ticket_id' => $lockedTicket->id,
+                    'message' => $message
+                ]);
+                $lockedTicket->reply_status = (int)$userId !== (int)$lockedTicket->user_id ? 1 : 0;
+                $lockedTicket->save();
+
+                return $ticketMessage;
+            }, 3);
+        } catch (\Throwable $error) {
+            report($error);
             return false;
         }
-        DB::commit();
-        return $ticketMessage;
     }
 
     public function replyByAdmin($ticketId, $message, $userId):void
     {
-        $ticket = Ticket::where('id', $ticketId)
-            ->first();
-        if (!$ticket) {
-            abort(500, '工单不存在');
+        list($ticket, $ticketMessage) = DB::transaction(function () use ($ticketId, $message, $userId) {
+            $ticket = Ticket::where('id', $ticketId)->lockForUpdate()->first();
+            if (!$ticket) {
+                abort(404, '工单不存在');
+            }
+
+            $ticketMessage = TicketMessage::create([
+                'user_id' => $userId,
+                'ticket_id' => $ticket->id,
+                'message' => $message
+            ]);
+            $ticket->status = 0;
+            $ticket->reply_status = (int)$userId !== (int)$ticket->user_id ? 1 : 0;
+            $ticket->save();
+
+            return [$ticket, $ticketMessage];
+        }, 3);
+
+        try {
+            $this->sendEmailNotify($ticket, $ticketMessage);
+        } catch (\Throwable $error) {
+            try {
+                report($error);
+            } catch (\Throwable $ignored) {
+                // The reply is already committed; notification failures are non-fatal.
+            }
         }
-        
-        DB::beginTransaction();
-        $ticketMessage = TicketMessage::create([
-            'user_id' => $userId,
-            'ticket_id' => $ticket->id,
-            'message' => $message
-        ]);
-        $ticket->status = 0;
-        if ($userId !== $ticket->user_id) {
-            $ticket->reply_status = 1;
-        } else {
-            $ticket->reply_status = 0;
-        }
-        $ticket->touch();
-        if (!$ticketMessage || !$ticket->save()) {
-            DB::rollback();
-            abort(500, '工单回复失败');
-        }
-        DB::commit();
-        $this->sendEmailNotify($ticket, $ticketMessage);
     }
 
     // 半小时内不再重复通知
     private function sendEmailNotify(Ticket $ticket, TicketMessage $ticketMessage)
     {
         $user = User::find($ticket->user_id);
+        if (!$user) {
+            return;
+        }
+
         $cacheKey = 'ticket_sendEmailNotify_' . $ticket->user_id;
-        if (!Cache::get($cacheKey)) {
-            Cache::put($cacheKey, 1, 1800);
+        if (Cache::add($cacheKey, 1, 1800)) {
+            try {
             SendEmailJob::dispatch([
                 'email' => $user->email,
                 'subject' => '您在' . config('v2board.app_name', 'V2Board') . '的工单得到了回复',
                 'template_name' => 'notify',
                 'template_value' => [
                     'name' => config('v2board.app_name', 'V2Board'),
-                    'url' => config('v2board.app_url'),
+                    'url' => ConfiguredUrl::applicationUrl(),
                     'content' => "主题：{$ticket->subject}\r\n回复内容：{$ticketMessage->message}"
                 ]
             ]);
+            } catch (\Throwable $error) {
+                Cache::forget($cacheKey);
+                throw $error;
+            }
         }
     }
 }

@@ -2,9 +2,12 @@
 
 namespace App\Payments;
 
+use App\Payments\Support\PaymentAmountSupport;
 use \Curl\Curl;
 
 class BEasyPaymentUSDT {
+    use PaymentAmountSupport;
+
     public function __construct($config)
     {
         $this->config = $config;
@@ -45,19 +48,34 @@ class BEasyPaymentUSDT {
         $str = stripslashes(urldecode(http_build_query($params))) . $this->config['bepusdt_apitoken'];
         $params['signature'] = md5($str);
 
-        $curl = new Curl();
-        $curl->setUserAgent('BEPUSDT');
-        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, 0);
-        $curl->setOpt(CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
-        $curl->post($this->config['bepusdt_url'] . '/api/v1/order/create-transaction', json_encode($params));
-        $result = $curl->response;
-        $curl->close();
-
-        if (!isset($result->status_code) || $result->status_code != 200) {
-            abort(500, "Failed to create order. Error: {$result->message}");
+        $payload = json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($payload === false) {
+            abort(500, __('Payment gateway request failed'));
         }
 
-        $paymentURL = $result->data->payment_url;
+        $curl = new Curl();
+        $curl->setUserAgent('BEPUSDT');
+        $curl->setConnectTimeout(10);
+        $curl->setTimeout(30);
+        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, true);
+        $curl->setOpt(CURLOPT_SSL_VERIFYHOST, 2);
+        $curl->setOpt(CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
+        $curl->post(rtrim((string) $this->config['bepusdt_url'], '/') . '/api/v1/order/create-transaction', $payload);
+        $result = $curl->response;
+        $requestFailed = $curl->error;
+        $errorMessage = $curl->errorMessage;
+        $curl->close();
+
+        if ($requestFailed || !is_object($result) || !isset($result->status_code) || (int) $result->status_code !== 200) {
+            report(new \RuntimeException('BEPUSDT create order failed: ' . ($errorMessage ?: 'invalid response')));
+            abort(500, __('Payment gateway request failed'));
+        }
+
+        $paymentURL = $result->data->payment_url ?? null;
+        if (!is_string($paymentURL) || $paymentURL === '') {
+            report(new \RuntimeException('BEPUSDT create order response is missing payment_url'));
+            abort(500, __('Payment gateway request failed'));
+        }
         return [
             'type' => 1, // 0:qrcode 1:url
             'data' => $paymentURL
@@ -66,23 +84,43 @@ class BEasyPaymentUSDT {
 
     public function notify($params)
     {
-        $sign = $params['signature'];
+        $requiredFields = ['signature', 'order_id', 'trade_id', 'status', 'amount'];
+        if (!$this->hasScalarCallbackFields($params, $requiredFields)
+            || !$this->hasOnlyScalarCallbackValues($params)) {
+            abort(400, 'Required BEPUSDT callback fields are missing');
+        }
+        $apiToken = $this->config['bepusdt_apitoken'] ?? null;
+        if (!is_string($apiToken) || trim($apiToken) === '') {
+            abort(400, 'BEPUSDT callback configuration is incomplete');
+        }
+        $sign = strtolower(trim((string) $params['signature']));
         unset($params['signature']);
         ksort($params);
         reset($params);
-        $str = stripslashes(urldecode(http_build_query($params))) . $this->config['bepusdt_apitoken'];
+        $str = stripslashes(urldecode(http_build_query($params))) . $apiToken;
         $generateSignature = md5($str);
         if (!hash_equals($generateSignature, $sign)) {
-            return('cannot pass verification');
+            abort(400, 'BEPUSDT callback signature is invalid');
         }
-        $status = $params['status'];
         // 1: pending 2: success 3: expired
-        if ($status != 2) {
-            return('failed');
+        if (trim((string) $params['status']) !== '2') {
+            return [
+                'acknowledge_only' => true,
+                'custom_result' => 'failed'
+            ];
         }
+
+        $amount = $this->decimalToCents($params['amount']);
+        if ($amount === null || $amount <= 0 || trim((string) $params['order_id']) === '' || trim((string) $params['trade_id']) === '') {
+            abort(400, 'BEPUSDT callback payment details are invalid');
+        }
+
         return [
-            'trade_no' => $params['order_id'],
-            'callback_no' => $params['trade_id'],
+            'trade_no' => (string) $params['order_id'],
+            'callback_no' => (string) $params['trade_id'],
+            'amount' => $amount,
+            'currency' => 'CNY',
+            'expected_currency' => 'CNY',
             'custom_result' => 'ok'
         ];
     }

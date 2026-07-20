@@ -16,7 +16,7 @@ class Admin
      */
     public function handle($request, Closure $next)
     {
-        $authorization = $request->input('auth_data') ?? $request->header('authorization');
+        $authorization = AuthService::extractAuthData($request);
         if (!$authorization) abort(403, '未登录或登陆已过期');
 
         $user = AuthService::decryptAuthData($authorization);

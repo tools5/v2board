@@ -15,6 +15,7 @@ use App\Models\ServerTuic;
 use App\Models\ServerAnytls;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
+use App\Support\ConfiguredUrl;
 use Illuminate\Support\Facades\Cache;
 
 class ServerService
@@ -389,9 +390,12 @@ class ServerService
                 $servers[$k]['padding_scheme'] = json_encode($v['padding_scheme']);
             }
 
-            $apiHost = config('v2board.server_api_url', config('v2board.app_url'));
-            $apiKey = config('v2board.server_token', '');
+            $apiHost = ConfiguredUrl::normalizeHttpUrl(config('v2board.server_api_url', ''));
+            if ($apiHost === '') {
+                $apiHost = ConfiguredUrl::applicationUrl();
+            }
             $nodeId = (int) $v['id'];
+            $apiKey = Helper::getNodeToken($nodeId, 'v2node');
             $apiHostArg = escapeshellarg((string) $apiHost);
             $apiKeyArg = escapeshellarg((string) $apiKey);
             $servers[$k]['install_command'] = sprintf(
@@ -441,12 +445,23 @@ class ServerService
 
     public function getRoutes(array $routeIds)
     {
-        $routeIds = array_map('intval', $routeIds);
-        $order = implode(',', $routeIds);
+        $routeIds = array_values(array_unique(array_filter(
+            array_map('intval', $routeIds),
+            static function ($routeId) {
+                return $routeId > 0;
+            }
+        )));
+        if ($routeIds === []) {
+            return collect();
+        }
+
         $routes = ServerRoute::select(['id', 'match', 'action', 'action_value'])
             ->whereIn('id', $routeIds)
-            ->orderByRaw("FIELD(id, $order)")
             ->get();
+        $positions = array_flip($routeIds);
+        $routes = $routes->sortBy(static function ($route) use ($positions) {
+            return $positions[$route->id] ?? PHP_INT_MAX;
+        })->values();
         foreach ($routes as $k => $route) {
             $array = json_decode($route->match, true);
             if (is_array($array)) $routes[$k]['match'] = $array;

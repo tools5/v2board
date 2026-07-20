@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class CouponGenerate extends FormRequest
 {
@@ -13,18 +14,34 @@ class CouponGenerate extends FormRequest
      */
     public function rules()
     {
+        $couponId = $this->input('id');
+
         return [
-            'generate_count' => 'nullable|integer|max:500',
-            'name' => 'required',
+            'id' => 'nullable|integer|min:1',
+            'generate_count' => 'nullable|integer|min:1|max:500',
+            'name' => 'required|string|max:255',
             'type' => 'required|in:1,2',
-            'value' => 'required|integer',
+            'value' => [
+                'required',
+                'integer',
+                'min:1',
+                Rule::when((int)$this->input('type') === 2, ['max:100'])
+            ],
             'started_at' => 'required|integer',
-            'ended_at' => 'required|integer',
-            'limit_use' => 'nullable|integer',
-            'limit_use_with_user' => 'nullable|integer',
-            'limit_plan_ids' => 'nullable|array',
-            'limit_period' => 'nullable|array',
-            'code' => ''
+            'ended_at' => 'required|integer|gt:started_at',
+            'limit_use' => 'nullable|integer|min:1',
+            'limit_use_with_user' => 'nullable|integer|min:1',
+            'limit_plan_ids' => 'nullable|array|max:100',
+            'limit_plan_ids.*' => 'integer|distinct|exists:v2_plan,id',
+            'limit_period' => 'nullable|array|max:8',
+            'limit_period.*' => 'string|distinct|in:month_price,quarter_price,half_year_price,year_price,two_year_price,three_year_price,onetime_price,reset_price',
+            'code' => [
+                'nullable',
+                'string',
+                'max:64',
+                'regex:/^[^\\x00-\\x1F\\x7F]+$/u',
+                Rule::unique('v2_coupon', 'code')->ignore($couponId)
+            ]
         ];
     }
 

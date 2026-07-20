@@ -2,6 +2,8 @@
 
 namespace App\Protocols;
 
+use App\Support\ConfiguredUrl;
+use App\Support\SubscriptionHeaders;
 use App\Utils\Helper;
 
 class Surfboard
@@ -21,8 +23,8 @@ class Surfboard
         $servers = $this->servers;
         $user = $this->user;
 
-        $appName = config('v2board.app_name', 'V2Board');
-        header("content-disposition:attachment;filename*=UTF-8''".rawurlencode($appName).".conf");
+        $appName = SubscriptionHeaders::applicationName();
+        SubscriptionHeaders::send('Content-Disposition', SubscriptionHeaders::contentDisposition($appName, '.conf'));
 
         $proxies = '';
         $proxyGroup = '';
@@ -74,7 +76,7 @@ class Surfboard
 
         // Subscription link
         $subsURL = Helper::getSubscribeUrl($user['token']);
-        $subsDomain = $_SERVER['HTTP_HOST'];
+        $subsDomain = ConfiguredUrl::subscriptionHost($subsURL);
 
         $config = str_replace('$subs_link', $subsURL, $config);
         $config = str_replace('$subs_domain', $subsDomain, $config);

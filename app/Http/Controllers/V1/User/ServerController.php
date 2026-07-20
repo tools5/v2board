@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\V1\User;
 
+use App\Support\EtagMatcher;
+
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\ServerService;
@@ -22,8 +24,8 @@ class ServerController extends Controller
             $servers = $serverService->getAvailableServers($user);
         }
         $eTag = sha1(json_encode(array_column($servers, 'cache_key')));
-        if (strpos($request->header('If-None-Match'), $eTag) !== false ) {
-            abort(304);
+        if (EtagMatcher::matches($request->header('If-None-Match'), $eTag)) {
+            return response('', 304)->header('ETag', "\"{$eTag}\"");
         }
 
         return response([

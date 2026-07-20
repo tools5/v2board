@@ -2,6 +2,8 @@
 
 namespace App\Protocols;
 
+use App\Support\ConfiguredUrl;
+use App\Support\SubscriptionHeaders;
 use App\Utils\Helper;
 use Symfony\Component\Yaml\Yaml;
 
@@ -21,10 +23,10 @@ class Stash
     {
         $servers = $this->servers;
         $user = $this->user;
-        $appName = config('v2board.app_name', 'V2Board');
-        header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
-        header('profile-update-interval: 24');
-        header("content-disposition: filename*=UTF-8''".rawurlencode($appName));
+        $appName = SubscriptionHeaders::applicationName();
+        SubscriptionHeaders::send('subscription-userinfo', SubscriptionHeaders::userInfo($user));
+        SubscriptionHeaders::send('profile-update-interval', '24');
+        SubscriptionHeaders::send('Content-Disposition', SubscriptionHeaders::contentDisposition($appName));
         // 暂时使用clash配置文件，后续根据Stash更新情况更新
         $defaultConfig = base_path() . '/resources/rules/default.stash.yaml';
         $customConfig = base_path() . '/resources/rules/custom.stash.yaml';
@@ -97,7 +99,7 @@ class Stash
         });
         $config['proxy-groups'] = array_values($config['proxy-groups']);
         // Force the current subscription domain to be a direct rule
-        $subsDomain = $_SERVER['HTTP_HOST'];
+        $subsDomain = ConfiguredUrl::subscriptionHost();
         if ($subsDomain) {
             array_unshift($config['rules'], "DOMAIN,{$subsDomain},DIRECT");
         }

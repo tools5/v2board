@@ -2,6 +2,8 @@
 
 namespace App\Services\Oauth;
 
+use App\Support\ConfiguredUrl;
+
 use App\Models\InviteCode;
 use App\Models\OauthUser;
 use App\Models\Plan;
@@ -1184,14 +1186,13 @@ class OauthService
     {
         $code = Helper::guid();
         Cache::put(CacheKey::get('TEMP_TOKEN', $code), $user->id, 120);
-        $path = '/#/login?verify=' . $code . '&redirect=' . ($redirect ?: 'dashboard');
-        // 追加额外查询参数（如 oauth_setup=1，用于引导「完善信息」页）
-        if (!empty($extraQuery)) {
-            $path .= '&' . http_build_query($extraQuery);
-        }
-        if (config('v2board.app_url')) {
-            return rtrim(config('v2board.app_url'), '/') . $path;
-        }
-        return url($path);
+        // Extra state is internal, while verify and redirect remain non-overridable.
+        $query = array_merge($extraQuery, [
+            'verify' => $code,
+            'redirect' => ConfiguredUrl::normalizeFrontendRedirect($redirect),
+        ]);
+        $path = '/#/login?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+
+        return ConfiguredUrl::applicationPathUrl($path);
     }
 }

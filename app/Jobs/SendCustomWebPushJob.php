@@ -5,19 +5,22 @@ namespace App\Jobs;
 use App\Models\WebPushMessage;
 use App\Services\WebPushService;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
-class SendCustomWebPushJob implements ShouldQueue
+class SendCustomWebPushJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     protected $messageId;
-    public $tries = 3;
+    // Push providers cannot guarantee idempotency after a partial delivery.
+    public $tries = 1;
     public $timeout = 300;
+    public $uniqueFor = 600;
 
     public function __construct($messageId)
     {
@@ -25,15 +28,26 @@ class SendCustomWebPushJob implements ShouldQueue
         $this->messageId = (int)$messageId;
     }
 
-    public function backoff()
+    public function uniqueId()
     {
-        return [15, 60];
+        return (string)$this->messageId;
     }
 
     public function handle(WebPushService $webPushService)
     {
+        $claimed = WebPushMessage::query()
+            ->where('id', $this->messageId)
+            ->where('status', 'queued')
+            ->update([
+                'status' => 'sending',
+                'updated_at' => time(),
+            ]);
+        if ($claimed !== 1) {
+            return;
+        }
+
         $message = WebPushMessage::find($this->messageId);
-        if (!$message || $message->status === 'sent') {
+        if (!$message) {
             return;
         }
 
@@ -43,9 +57,6 @@ class SendCustomWebPushJob implements ShouldQueue
             $message->save();
             return;
         }
-
-        $message->status = 'sending';
-        $message->save();
 
         try {
             $payload = $webPushService->normalizePayload([
@@ -94,10 +105,38 @@ class SendCustomWebPushJob implements ShouldQueue
                 'total' => $stats['total'],
             ]);
         } catch (\Throwable $error) {
-            $message->status = 'failed';
-            $message->error_message = $error->getMessage();
-            $message->save();
+            WebPushMessage::query()
+                ->where('id', $this->messageId)
+                ->where('status', 'sending')
+                ->update([
+                    'status' => 'failed',
+                    'error_message' => '推送任务执行失败，请检查服务器日志',
+                    'updated_at' => time(),
+                ]);
+            Log::error('Custom web push job failed', [
+                'message_id' => $this->messageId,
+                'exception' => $error,
+            ]);
             throw $error;
+        }
+    }
+
+    public function failed(\Throwable $error)
+    {
+        $updated = WebPushMessage::query()
+            ->where('id', $this->messageId)
+            ->where('status', 'sending')
+            ->update([
+                'status' => 'failed',
+                'error_message' => '推送任务执行失败，请检查服务器日志',
+                'updated_at' => time(),
+            ]);
+
+        if ($updated === 1) {
+            Log::error('Custom web push job failed', [
+                'message_id' => $this->messageId,
+                'exception' => $error,
+            ]);
         }
     }
 }

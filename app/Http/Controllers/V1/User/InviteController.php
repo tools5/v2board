@@ -9,26 +9,53 @@ use App\Models\Order;
 use App\Models\User;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class InviteController extends Controller
 {
+    private const MAX_PAGE_SIZE = 100;
+
     public function save(Request $request)
     {
-        if (InviteCode::where('user_id', $request->user['id'])->where('status', 0)->count() >= config('v2board.invite_gen_limit', 5)) {
-            abort(500, __('The maximum number of creations has been reached'));
-        }
-        $inviteCode = new InviteCode();
-        $inviteCode->user_id = $request->user['id'];
-        $inviteCode->code = Helper::randomChar(8);
+        $inviteCode = DB::transaction(function () use ($request) {
+            $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
+            if (!$user) {
+                abort(404, __('The user does not exist'));
+            }
+
+            $limit = max(0, (int)config('v2board.invite_gen_limit', 5));
+            $activeCount = InviteCode::where('user_id', $user->id)->where('status', 0)->count();
+            if ($activeCount >= $limit) {
+                abort(422, __('The maximum number of creations has been reached'));
+            }
+
+            do {
+                $code = Helper::randomChar(12);
+            } while (InviteCode::where('code', $code)->exists());
+
+            $inviteCode = new InviteCode();
+            $inviteCode->user_id = $user->id;
+            $inviteCode->code = $code;
+            if (!$inviteCode->save()) {
+                throw new \RuntimeException('邀请码保存失败');
+            }
+
+            return $inviteCode;
+        });
+
         return response([
-            'data' => $inviteCode->save()
+            'data' => (bool)$inviteCode->exists
         ]);
     }
 
     public function details(Request $request)
     {
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = $request->input('page_size') >= 10 ? $request->input('page_size') : 10;
+        $payload = $request->validate([
+            'current' => 'nullable|integer|min:1',
+            'page_size' => 'nullable|integer|min:1'
+        ]);
+        $current = max(1, (int)($payload['current'] ?? 1));
+        $pageSize = min(self::MAX_PAGE_SIZE, max(10, (int)($payload['page_size'] ?? 10)));
         $builder = CommissionLog::where('invite_user_id', $request->user['id'])
             ->where('get_amount', '>', 0)
             ->select([
@@ -55,6 +82,9 @@ class InviteController extends Controller
             ->get();
         $commission_rate = config('v2board.invite_commission', 10);
         $user = User::find($request->user['id']);
+        if (!$user) {
+            abort(404, __('The user does not exist'));
+        }
         if ($user->commission_rate) {
             $commission_rate = $user->commission_rate;
         }

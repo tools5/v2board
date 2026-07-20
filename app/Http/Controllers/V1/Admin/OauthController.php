@@ -15,6 +15,7 @@ use App\Models\TicketMessage;
 use App\Models\User;
 use App\Models\UserOauth;
 use App\Services\AuthService;
+use App\Support\ConfiguredUrl;
 use App\Services\Oauth\OauthProviderRegistry;
 use App\Services\Oauth\OauthService;
 use App\Utils\Helper;
@@ -470,7 +471,7 @@ class OauthController extends Controller
                 'template_name' => 'notify',
                 'template_value' => [
                     'name' => config('v2board.app_name', 'V2Board'),
-                    'url' => config('v2board.app_url'),
+                    'url' => ConfiguredUrl::applicationUrl(),
                     'content' => $request->input('content'),
                 ],
             ], 'send_email_mass');
@@ -1039,7 +1040,12 @@ class OauthController extends Controller
 
     private function csvCell($value): string
     {
-        $text = str_replace(['"', "\r", "\n"], ['""', ' ', ' '], (string)$value);
+        $text = preg_replace('/\R/u', ' ', (string)$value);
+        $text = str_replace('"', '""', $text);
+        if (preg_match('/^[\s]*[=+\-@]/u', $text)) {
+            $text = "'" . $text;
+        }
+
         return '"' . $text . '"';
     }
 }

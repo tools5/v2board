@@ -5,8 +5,8 @@
 | Web Push defaults (env fallback)
 |--------------------------------------------------------------------------
 |
-| Admin panel "Web Push" settings are saved into config/v2board.php.
-| Runtime prefers admin values; falls back to this file / .env when unset.
+| Admin panel settings are saved into storage/app/webpush-settings.json.
+| Runtime prefers those values and falls back to this file / .env when unset.
 |
 */
 
@@ -31,6 +31,12 @@ return [
     'request_timeout' => (int)env('WEB_PUSH_REQUEST_TIMEOUT', 30),
     'proxy' => env('WEB_PUSH_PROXY'),
     'ca_bundle' => env('WEB_PUSH_CA_BUNDLE'),
+    'allowed_endpoint_hosts' => preg_split(
+        '/[\s,]+/',
+        (string)env('WEB_PUSH_ALLOWED_ENDPOINT_HOSTS', ''),
+        -1,
+        PREG_SPLIT_NO_EMPTY
+    ),
     'remind' => [
         'expire_enabled' => (bool)env('WEB_PUSH_REMIND_EXPIRE', true),
         'traffic_enabled' => (bool)env('WEB_PUSH_REMIND_TRAFFIC', true),

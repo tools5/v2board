@@ -18,11 +18,96 @@ use App\Models\StatServer;
 use App\Models\StatUser;
 use App\Models\Ticket;
 use App\Models\User;
+use App\Services\StatisticalService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class StatController extends Controller
 {
+    public function getStat(Request $request)
+    {
+        [$startAt, $endAt] = $this->validateRange($request);
+
+        if ($startAt === null) {
+            return [
+                'data' => (new StatisticalService())->generateStatData()
+            ];
+        }
+
+        $stats = Stat::where('record_at', '>=', $startAt)
+            ->where('record_at', '<', $endAt)
+            ->where('record_type', 'd')
+            ->get()
+            ->makeHidden(['record_at', 'created_at', 'updated_at', 'id', 'record_type'])
+            ->toArray();
+
+        $stats = array_reduce($stats, function (array $carry, array $item) {
+            foreach ($item as $key => $value) {
+                $carry[$key] = ($carry[$key] ?? 0) + $value;
+            }
+            return $carry;
+        }, []);
+
+        return [
+            'data' => $stats
+        ];
+    }
+
+    public function getStatRecord(Request $request)
+    {
+        $request->validate([
+            'type' => 'required|in:paid_total,commission_total,register_count'
+        ]);
+        [$startAt, $endAt] = $this->validateRange($request, true);
+
+        $statisticalService = new StatisticalService();
+        $statisticalService->setStartAt($startAt);
+        $statisticalService->setEndAt($endAt);
+
+        return [
+            'data' => $statisticalService->getStatRecord($request->input('type'))
+        ];
+    }
+
+    public function getRanking(Request $request)
+    {
+        $params = $request->validate([
+            'type' => 'required|in:server_traffic_rank,user_consumption_rank,invite_rank',
+            'limit' => 'nullable|integer|between:1,100'
+        ]);
+        [$startAt, $endAt] = $this->validateRange($request, true);
+
+        $statisticalService = new StatisticalService();
+        $statisticalService->setStartAt($startAt);
+        $statisticalService->setEndAt($endAt);
+
+        return [
+            'data' => $statisticalService->getRanking(
+                $params['type'],
+                isset($params['limit']) ? (int)$params['limit'] : 20
+            )
+        ];
+    }
+
+    private function validateRange(Request $request, bool $useTodayByDefault = false): array
+    {
+        $params = $request->validate([
+            'start_at' => 'nullable|integer|min:0|required_with:end_at',
+            'end_at' => 'nullable|integer|min:1|required_with:start_at|gt:start_at'
+        ]);
+
+        if (!isset($params['start_at'], $params['end_at'])) {
+            if (!$useTodayByDefault) {
+                return [null, null];
+            }
+
+            $startAt = strtotime(date('Y-m-d'));
+            return [$startAt, strtotime('+1 day', $startAt)];
+        }
+
+        return [(int)$params['start_at'], (int)$params['end_at']];
+    }
+
     public function getOverride(Request $request)
     {
         return [
@@ -197,91 +282,26 @@ class StatController extends Controller
     {
         $startAt = strtotime(date('Y-m-d'));
         $endAt = time();
-        $statistics = StatUser::select([
-            'user_id',
-            'server_rate',
-            'u',
-            'd',
-            DB::raw('(u+d) as total')
-        ])
-            ->where('record_at', '>=', $startAt)
-            ->where('record_at', '<', $endAt)
-            ->where('record_type', 'd')
-            ->limit(30)
-            ->orderBy('total', 'DESC')
-            ->get()
-            ->toArray();
-        $data = [];
-        $idIndexMap = [];
-        foreach ($statistics as $k => $v) {
-            $id = $statistics[$k]['user_id'];
-            $user = User::where('id', $id)->first();
-            $statistics[$k]['email'] = empty($user) ? "null" : $user['email'];
-            $statistics[$k]['total'] = $statistics[$k]['total'] * $statistics[$k]['server_rate'] / 1073741824;
-            if (isset($idIndexMap[$id])) {
-                $index = $idIndexMap[$id];
-                $data[$index]['total'] += $statistics[$k]['total'];
-            } else {
-                unset($statistics[$k]['server_rate']);
-                $data[] = $statistics[$k];
-                $idIndexMap[$id] = count($data) - 1;
-            }
-        }
-        array_multisort(array_column($data, 'total'), SORT_DESC, $data);
-        return [
-            'data' => array_slice($data, 0, 15)
-        ];
+        return ['data' => $this->getUserTrafficRank($startAt, $endAt)];
     }
 
     public function getUserLastRank()
     {
         $startAt = strtotime('-1 day', strtotime(date('Y-m-d')));
         $endAt = strtotime(date('Y-m-d'));
-        $statistics = StatUser::select([
-            'user_id',
-            'server_rate',
-            'u',
-            'd',
-            DB::raw('(u+d) as total')
-        ])
-            ->where('record_at', '>=', $startAt)
-            ->where('record_at', '<', $endAt)
-            ->where('record_type', 'd')
-            ->limit(30)
-            ->orderBy('total', 'DESC')
-            ->get()
-            ->toArray();
-        $data = [];
-        $idIndexMap = [];
-        foreach ($statistics as $k => $v) {
-            $id = $statistics[$k]['user_id'];
-            $user = User::where('id', $id)->first();
-            $statistics[$k]['email'] = empty($user) ? "null" : $user['email'];
-            $statistics[$k]['total'] = $statistics[$k]['total'] * $statistics[$k]['server_rate'] / 1073741824;
-            if (isset($idIndexMap[$id])) {
-
-                $index = $idIndexMap[$id];
-                $data[$index]['total'] += $statistics[$k]['total'];
-            } else {
-                unset($statistics[$k]['server_rate']);
-                $data[] = $statistics[$k];
-                $idIndexMap[$id] = count($data) - 1;
-            }
-        }
-        array_multisort(array_column($data, 'total'), SORT_DESC, $data);
-        return [
-            'data' => array_slice($data, 0, 15)
-        ];
+        return ['data' => $this->getUserTrafficRank($startAt, $endAt)];
     }
 
     public function getStatUser(Request $request)
     {
-        $request->validate([
-            'user_id' => 'required|integer'
+        $payload = $request->validate([
+            'user_id' => 'required|integer|min:1',
+            'current' => 'nullable|integer|min:1',
+            'pageSize' => 'nullable|integer|min:1'
         ]);
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
-        $builder = StatUser::orderBy('record_at', 'DESC')->where('user_id', $request->input('user_id'));
+        $current = max(1, (int)($payload['current'] ?? 1));
+        $pageSize = min(100, max(10, (int)($payload['pageSize'] ?? 10)));
+        $builder = StatUser::orderBy('record_at', 'DESC')->where('user_id', $payload['user_id']);
 
         $total = $builder->count();
         $records = $builder->forPage($current, $pageSize)
@@ -292,5 +312,22 @@ class StatController extends Controller
         ];
     }
 
-}
+    private function getUserTrafficRank($startAt, $endAt)
+    {
+        return StatUser::query()
+            ->leftJoin('v2_user as rank_user', 'v2_stat_user.user_id', '=', 'rank_user.id')
+            ->select([
+                'v2_stat_user.user_id',
+                DB::raw("COALESCE(rank_user.email, 'null') as email"),
+                DB::raw('SUM((v2_stat_user.u + v2_stat_user.d) * v2_stat_user.server_rate) / 1073741824 as total')
+            ])
+            ->where('v2_stat_user.record_at', '>=', $startAt)
+            ->where('v2_stat_user.record_at', '<', $endAt)
+            ->where('v2_stat_user.record_type', 'd')
+            ->groupBy('v2_stat_user.user_id', 'rank_user.email')
+            ->orderBy('total', 'DESC')
+            ->limit(15)
+            ->get();
+    }
 
+}

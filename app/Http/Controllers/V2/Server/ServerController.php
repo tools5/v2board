@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\V2\Server;
 
+use App\Support\EtagMatcher;
+
 use App\Http\Controllers\Controller;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
@@ -17,6 +19,10 @@ class ServerController extends Controller
     {
         $token = $request->input('token');
 
+        $this->nodeId = filter_var($request->input('node_id'), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+
         // token 为空（业务失败，不抛异常）
         if (empty($token)) {
             response()->json([
@@ -26,8 +32,16 @@ class ServerController extends Controller
             exit;
         }
 
+        if (!$this->nodeId) {
+            response()->json([
+                'status' => 'fail',
+                'message' => 'node parameter is error'
+            ], 200)->send();
+            exit;
+        }
+
         // token 错误
-        if ($token !== config('v2board.server_token')) {
+        if (!Helper::verifyNodeToken($token, $this->nodeId, 'v2node')) {
             response()->json([
                 'status' => 'fail',
                 'message' => 'token is error'
@@ -35,7 +49,6 @@ class ServerController extends Controller
             exit;
         }
 
-        $this->nodeId = $request->input('node_id');
         $this->serverService = new ServerService();
         $this->nodeInfo = $this->serverService->getServer($this->nodeId, "v2node");
 
@@ -103,7 +116,7 @@ class ServerController extends Controller
         $eTag = sha1($rsp);
 
         // 不使用 abort(304)，避免异常路径
-        if ($request->header('If-None-Match') === $eTag) {
+        if (EtagMatcher::matches($request->header('If-None-Match'), $eTag)) {
             return response('', 304)->header('ETag', "\"{$eTag}\"");
         }
 

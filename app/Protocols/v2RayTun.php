@@ -2,10 +2,15 @@
 
 namespace App\Protocols;
 
+use App\Support\SubscriptionHeaders;
 use App\Utils\Helper;
 
 class v2RayTun
 {
+    private const MAX_ANNOUNCE_LENGTH = 4096;
+    private const MAX_ANNOUNCE_URL_LENGTH = 2048;
+    private const MAX_PROFILE_UPDATE_INTERVAL = 720;
+
     public $flag = 'v2raytun';
     private $servers;
     private $user;
@@ -27,70 +32,136 @@ class v2RayTun
         }
         $body = base64_encode($uri);
 
-        // 构建 v2raytun 标头
-        $appName = config('v2board.app_name', 'V2Board');
+        // Build v2raytun headers from bounded, validated values only.
+        $appName = SubscriptionHeaders::applicationName();
         $headers = [
-            // profile-title 支持 base64 和原文
             'profile-title' => $this->getProfileTitle($appName),
-            // subscription-userinfo
             'subscription-userinfo' => $this->getUserInfoHeader($this->user),
-            // profile-update-interval
-            'profile-update-interval' => $this->options['profile_update_interval'] ?? '24',
+            'profile-update-interval' => $this->getProfileUpdateInterval(),
         ];
 
-        // routing 路由（base64）
-        if (!empty($this->options['routing'])) {
-            $headers['routing'] = $this->options['routing'];
+        $routing = SubscriptionHeaders::value($this->options['routing'] ?? null);
+        if ($routing !== null) {
+            $headers['routing'] = $routing;
         }
-        // announce 公告
-        if (!empty($this->options['announce'])) {
-            $headers['announce'] = $this->getAnnounceHeader($this->options['announce']);
-        }
-        // announce-url 公告链接
-        if (!empty($this->options['announce_url'])) {
-            $headers['announce-url'] = $this->options['announce_url'];
-        }
-        // update-always 每次登录强制更新订阅
-        if (!empty($this->options['update_always'])) {
-            $headers['update-always'] = isset($this->options['update_always']) ? ($this->options['update_always'] ? 'true' : 'false') : 'true';
-        }
-        // Content-Disposition
-        $headers['Content-Disposition'] = 'attachment; filename="' . $appName . '"';
 
-        // 返回响应
-        $response = response($body, 200);
-        foreach ($headers as $k => $v) {
-            $response->header($k, $v);
+        $announce = $this->getAnnounceHeader($this->options['announce'] ?? null);
+        if ($announce !== null) {
+            $headers['announce'] = $announce;
         }
+
+        $announceUrl = $this->getAnnounceUrlHeader($this->options['announce_url'] ?? null);
+        if ($announceUrl !== null) {
+            $headers['announce-url'] = $announceUrl;
+        }
+
+        if ($this->isEnabled($this->options['update_always'] ?? null)) {
+            $headers['update-always'] = 'true';
+        }
+
+        $headers['Content-Disposition'] = SubscriptionHeaders::contentDisposition($appName);
+
+        $response = response($body, 200);
+        foreach ($headers as $name => $value) {
+            $safeValue = SubscriptionHeaders::value($value);
+            if ($safeValue !== null) {
+                $response->header($name, $safeValue);
+            }
+        }
+
         return $response;
     }
 
     // profile-title 支持 base64 和原文
     protected function getProfileTitle($appName)
     {
-        if (!empty($this->options['profile_title_base64'])) {
-            return 'base64:' . base64_encode($appName);
+        if ($this->isEnabled($this->options['profile_title_base64'] ?? null)) {
+            return SubscriptionHeaders::base64ProfileTitle($appName);
         }
+
         return $appName;
     }
 
     // subscription-userinfo
     protected function getUserInfoHeader($user)
     {
-        $parts = [];
-        if (isset($user['u'])) $parts[] = "upload={$user['u']}";
-        if (isset($user['d'])) $parts[] = "download={$user['d']}";
-        if (isset($user['transfer_enable'])) $parts[] = "total={$user['transfer_enable']}";
-        if (isset($user['expired_at'])) $parts[] = "expire={$user['expired_at']}";
-        return implode('; ', $parts);
+        return SubscriptionHeaders::userInfo($user);
     }
 
     // announce 支持 base64 和原文
     protected function getAnnounceHeader($announce)
     {
-        if (isset($this->options['announce_base64']) && $this->options['announce_base64']) {
-            return 'base64:' . base64_encode($announce);
+        $base64 = $this->isEnabled($this->options['announce_base64'] ?? null);
+        // A base64 payload grows by roughly a third, so bound the source accordingly.
+        $maxLength = $base64 ? 3000 : self::MAX_ANNOUNCE_LENGTH;
+        $announce = SubscriptionHeaders::value($announce, $maxLength);
+        if ($announce === null) {
+            return null;
         }
-        return $announce;
+
+        return $base64 ? 'base64:' . base64_encode($announce) : $announce;
+    }
+
+    private function getProfileUpdateInterval(): string
+    {
+        $value = $this->options['profile_update_interval'] ?? 24;
+        if ((!is_int($value) && !is_string($value))
+            || !preg_match('/\A\d{1,3}\z/', (string)$value)) {
+            return '24';
+        }
+
+        $interval = (int)$value;
+        if ($interval < 1 || $interval > self::MAX_PROFILE_UPDATE_INTERVAL) {
+            return '24';
+        }
+
+        return (string)$interval;
+    }
+
+    private function getAnnounceUrlHeader($url): ?string
+    {
+        $url = SubscriptionHeaders::value($url, self::MAX_ANNOUNCE_URL_LENGTH);
+        if ($url === null || strpos($url, '\\') !== false) {
+            return null;
+        }
+
+        $parts = parse_url($url);
+        if (!is_array($parts)
+            || !isset($parts['scheme'], $parts['host'])
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || !in_array(strtolower((string)$parts['scheme']), ['http', 'https'], true)) {
+            return null;
+        }
+
+        $host = strtolower(rtrim(trim((string)$parts['host'], '[]'), '.'));
+        if ($host === ''
+            || (filter_var($host, FILTER_VALIDATE_IP) === false
+                && filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false)) {
+            return null;
+        }
+
+        if (isset($parts['port']) && ((int)$parts['port'] < 1 || (int)$parts['port'] > 65535)) {
+            return null;
+        }
+
+        return filter_var($url, FILTER_VALIDATE_URL) === false ? null : $url;
+    }
+
+    private function isEnabled($value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return $value === 1;
+        }
+
+        if (!is_string($value)) {
+            return false;
+        }
+
+        return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
     }
 }

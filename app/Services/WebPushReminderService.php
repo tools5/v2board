@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\WebPushSubscription;
+use App\Support\ConfiguredUrl;
 use App\Utils\CacheKey;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -92,25 +93,30 @@ class WebPushReminderService
             }
 
             $cacheKey = CacheKey::get('LAST_SEND_WEBPUSH_REMIND_EXPIRE', $user->id . '_' . $remainingDays);
-            if (!$forceIgnoreCache && Cache::get($cacheKey)) {
+            $lockKey = $this->acquireReminderLock($cacheKey, $forceIgnoreCache);
+            if ($lockKey === null) {
                 continue;
             }
 
-            $payload = $this->buildExpirePayload($user, $remainingDays, $settings);
-            $sendStats = $this->webPushService->sendToUserIds([(int)$user->id], $payload);
-            if (($sendStats['sent'] ?? 0) > 0) {
-                // 同一剩余天数只提醒一次，缓存略大于 1 天避免跨日重复
-                Cache::put($cacheKey, 1, 30 * 3600);
-                $stats['sent_users']++;
-            } elseif (($sendStats['total'] ?? 0) === 0) {
-                // 无设备，短缓存避免空扫
-                Cache::put($cacheKey, 1, 6 * 3600);
-            } else {
-                Log::warning('Web push expire remind delivery failed', [
-                    'user_id' => $user->id,
-                    'remaining_days' => $remainingDays,
-                    'failed' => $sendStats['failed'] ?? 0,
-                ]);
+            try {
+                $payload = $this->buildExpirePayload($user, $remainingDays, $settings);
+                $sendStats = $this->webPushService->sendToUserIds([(int)$user->id], $payload);
+                if (($sendStats['sent'] ?? 0) > 0) {
+                    // 同一剩余天数只提醒一次，缓存略大于 1 天避免跨日重复
+                    Cache::put($cacheKey, 1, 30 * 3600);
+                    $stats['sent_users']++;
+                } elseif (($sendStats['total'] ?? 0) === 0) {
+                    // 无设备，短缓存避免空扫
+                    Cache::put($cacheKey, 1, 6 * 3600);
+                } else {
+                    Log::warning('Web push expire remind delivery failed', [
+                        'user_id' => $user->id,
+                        'remaining_days' => $remainingDays,
+                        'failed' => $sendStats['failed'] ?? 0,
+                    ]);
+                }
+            } finally {
+                Cache::forget($lockKey);
             }
         }
 
@@ -149,26 +155,50 @@ class WebPushReminderService
             }
 
             $cacheKey = CacheKey::get('LAST_SEND_WEBPUSH_REMIND_TRAFFIC', $user->id);
-            if (!$forceIgnoreCache && Cache::get($cacheKey)) {
+            $lockKey = $this->acquireReminderLock($cacheKey, $forceIgnoreCache);
+            if ($lockKey === null) {
                 continue;
             }
 
-            $payload = $this->buildTrafficPayload($user, $threshold, $settings);
-            $sendStats = $this->webPushService->sendToUserIds([(int)$user->id], $payload);
-            if (($sendStats['sent'] ?? 0) > 0) {
-                Cache::put($cacheKey, 1, 24 * 3600);
-                $stats['sent_users']++;
-            } elseif (($sendStats['total'] ?? 0) === 0) {
-                Cache::put($cacheKey, 1, 6 * 3600);
-            } else {
-                Log::warning('Web push traffic remind delivery failed', [
-                    'user_id' => $user->id,
-                    'failed' => $sendStats['failed'] ?? 0,
-                ]);
+            try {
+                $payload = $this->buildTrafficPayload($user, $threshold, $settings);
+                $sendStats = $this->webPushService->sendToUserIds([(int)$user->id], $payload);
+                if (($sendStats['sent'] ?? 0) > 0) {
+                    Cache::put($cacheKey, 1, 24 * 3600);
+                    $stats['sent_users']++;
+                } elseif (($sendStats['total'] ?? 0) === 0) {
+                    Cache::put($cacheKey, 1, 6 * 3600);
+                } else {
+                    Log::warning('Web push traffic remind delivery failed', [
+                        'user_id' => $user->id,
+                        'failed' => $sendStats['failed'] ?? 0,
+                    ]);
+                }
+            } finally {
+                Cache::forget($lockKey);
             }
         }
 
         return $stats;
+    }
+
+    private function acquireReminderLock($cacheKey, $forceIgnoreCache)
+    {
+        if (!$forceIgnoreCache && Cache::has($cacheKey)) {
+            return null;
+        }
+
+        $lockKey = $cacheKey . ':lock';
+        if (!Cache::add($lockKey, 1, 10 * 60)) {
+            return null;
+        }
+
+        if (!$forceIgnoreCache && Cache::has($cacheKey)) {
+            Cache::forget($lockKey);
+            return null;
+        }
+
+        return $lockKey;
     }
 
     private function subscribedUserIds()
@@ -203,7 +233,7 @@ class WebPushReminderService
         $expireText = date('Y-m-d H:i', (int)$user->expired_at);
         $url = trim((string)($settings['remind_expire_url'] ?? ''));
         if ($url === '') {
-            $url = rtrim((string)config('v2board.app_url', config('app.url', '')), '/') . '/#/plan';
+            $url = ConfiguredUrl::applicationPathUrl('/#/plan');
         }
 
         if ((int)$remainingDays <= 0) {
@@ -235,7 +265,7 @@ class WebPushReminderService
         $percent = min(99, (int)floor(($used / $enable) * 100));
         $url = trim((string)($settings['remind_traffic_url'] ?? ''));
         if ($url === '') {
-            $url = rtrim((string)config('v2board.app_url', config('app.url', '')), '/') . '/#/plan';
+            $url = ConfiguredUrl::applicationPathUrl('/#/plan');
         }
 
         return $this->webPushService->normalizePayload([

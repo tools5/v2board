@@ -17,6 +17,7 @@ use App\Services\AuthService;
 use App\Services\Oauth\OauthService;
 use App\Services\OrderService;
 use App\Services\UserService;
+use App\Support\ConfiguredUrl;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -185,12 +186,12 @@ class UserController extends Controller
         DB::beginTransaction();
 
         try {
-            $user = User::find($request->user['id']);
+            $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
             if (!$user) {
                 abort(500, __('The user does not exist'));
             }
             $giftcard_input = $request->giftcard;
-            $giftcard = Giftcard::where('code', $giftcard_input)->first();
+            $giftcard = Giftcard::where('code', $giftcard_input)->lockForUpdate()->first();
 
             if (!$giftcard) {
                 abort(500, __('The gift card does not exist'));
@@ -211,16 +212,24 @@ class UserController extends Controller
                 }
             }
 
-            $usedUserIds = $giftcard->used_user_ids ? json_decode($giftcard->used_user_ids, true) : [];
-            if (!is_array($usedUserIds)) {
-                $usedUserIds = [];
+            $storedUserIds = $giftcard->used_user_ids ? json_decode($giftcard->used_user_ids, true) : [];
+            $usedUserIds = [];
+            if (is_array($storedUserIds)) {
+                foreach ($storedUserIds as $storedUserId) {
+                    if ((is_int($storedUserId) || is_string($storedUserId))
+                        && ctype_digit((string)$storedUserId)
+                        && (int)$storedUserId > 0) {
+                        $usedUserIds[] = (int)$storedUserId;
+                    }
+                }
+                $usedUserIds = array_values(array_unique($usedUserIds));
             }
 
-            if (in_array($user->id, $usedUserIds)) {
+            if (in_array((int)$user->id, $usedUserIds, true)) {
                 abort(500, __('The gift card has already been used by this user'));
             }
 
-            $usedUserIds[] = $user->id;
+            $usedUserIds[] = (int)$user->id;
             $giftcard->used_user_ids = json_encode($usedUserIds);
 
             switch ($giftcard->type) {
@@ -248,6 +257,9 @@ class UserController extends Controller
                 case 5:
                     if ($user->plan_id == null || ($user->expired_at !== null && $user->expired_at < $currentTime)) {
                         $plan = Plan::where('id', $giftcard->plan_id)->first();
+                        if (!$plan) {
+                            abort(500, __('Subscription plan does not exist'));
+                        }
                         $user->plan_id = $plan->id;
                         $user->group_id = $plan->group_id;
                         $user->transfer_enable = $plan->transfer_enable * 1073741824;
@@ -282,9 +294,9 @@ class UserController extends Controller
                 'type' => $giftcard->type,
                 'value' => $giftcard->value
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
-            abort(500, $e->getMessage());
+            throw $e;
         }
     }
 
@@ -389,28 +401,32 @@ class UserController extends Controller
             abort(400, '请至少填写邮箱或密码');
         }
 
-        $user = User::find($request->user['id']);
-        if (!$user) {
-            abort(500, __('The user does not exist'));
-        }
-
-        // 仅允许 OAuth 绑定用户使用该接口，避免普通用户绕过校验直接改邮箱。
-        $bindings = UserOauth::where('user_id', $user->id)->get();
-        if ($bindings->isEmpty()) {
-            abort(403, '该功能仅对第三方登录用户开放');
-        }
-
-        $isPlaceholderEmail = (bool)preg_match('/@oauth\.local$/i', (string)$user->email);
-
         DB::beginTransaction();
+        $passwordChanged = false;
         try {
+            $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
+            if (!$user) {
+                abort(500, __('The user does not exist'));
+            }
+
+            // Locking the binding rows makes the password_never_set check single-use.
+            $bindings = UserOauth::where('user_id', $user->id)->lockForUpdate()->get();
+            if ($bindings->isEmpty()) {
+                abort(403, '该功能仅对第三方登录用户开放');
+            }
+
+            $passwordNeverSet = $bindings->contains(function ($binding) {
+                return (int)$binding->password_never_set === 1;
+            });
+            $isPlaceholderEmail = (bool)preg_match('/@oauth\.local$/i', (string)$user->email);
+
             if ($hasEmail) {
                 // 仅允许把占位邮箱替换为真实邮箱，禁止已绑定真实邮箱的用户在此接口改邮箱
                 if (!$isPlaceholderEmail) {
                     abort(400, '当前账号已绑定真实邮箱，如需修改请联系管理员');
                 }
                 $newEmail = trim($newEmail);
-                if (!filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
+                if (strlen($newEmail) > 64 || !filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
                     abort(400, __('Email format is incorrect'));
                 }
                 // 禁止再次写成占位域
@@ -442,12 +458,16 @@ class UserController extends Controller
             }
 
             if ($hasPassword) {
-                if (strlen($newPassword) < 8) {
+                if (!$passwordNeverSet) {
+                    abort(403, '密码已设置，请通过修改密码功能并验证旧密码');
+                }
+                if (strlen($newPassword) < 8 || strlen($newPassword) > 72) {
                     abort(400, __('Password must be greater than 8 digits'));
                 }
                 $user->password = password_hash($newPassword, PASSWORD_DEFAULT);
                 $user->password_algo = null;
                 $user->password_salt = null;
+                $passwordChanged = true;
             }
 
             if (!$user->save()) {
@@ -468,6 +488,10 @@ class UserController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
             throw $e;
+        }
+
+        if ($passwordChanged) {
+            (new AuthService($user))->removeAllSession();
         }
 
         return response([
@@ -651,12 +675,11 @@ class UserController extends Controller
         $code = Helper::guid();
         $key = CacheKey::get('TEMP_TOKEN', $code);
         Cache::put($key, $user->id, 60);
-        $redirect = '/#/login?verify=' . $code . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-        if (config('v2board.app_url')) {
-            $url = config('v2board.app_url') . $redirect;
-        } else {
-            $url = url($redirect);
-        }
+        $query = http_build_query([
+            'verify' => $code,
+            'redirect' => ConfiguredUrl::normalizeFrontendRedirect($request->input('redirect')),
+        ], '', '&', PHP_QUERY_RFC3986);
+        $url = ConfiguredUrl::applicationPathUrl('/#/login?' . $query);
         return response([
             'data' => $url
         ]);

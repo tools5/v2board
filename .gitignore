@@ -6,9 +6,17 @@
 /public/favicon.ico
 /storage/*.key
 /storage/app/webpush/cacert.pem
+/storage/app/webpush-settings.json
+/storage/app/webpush-settings.json.lock
+/storage/app/webpush-settings.json.backup-*
+/storage/app/.webpush-*
+/config/theme/.theme-*
+/config/theme/*.backup-*
 /vendor
 .env
 .env.backup
+/.env.backup-*
+/.env.lock
 .phpunit.result.cache
 .idea
 .lock
@@ -17,7 +25,6 @@ Homestead.yaml
 npm-debug.log
 yarn-error.log
 composer.phar
-composer.lock
 yarn.lock
 docker-compose.yml
 .DS_Store

@@ -14,8 +14,10 @@ class UserUpdate extends FormRequest
     public function rules()
     {
         return [
-            'email' => 'required|email:strict',
-            'password' => 'nullable|min:8',
+            'id' => 'required|integer|min:1',
+            'email' => 'required|email:strict|max:255',
+            'password' => 'nullable|string|min:8|max:72',
+            'invite_user_email' => 'nullable|email:strict|max:255',
             'transfer_enable' => 'numeric',
             'device_limit' => 'nullable|integer',
             'expired_at' => 'nullable|integer',
@@ -38,6 +40,8 @@ class UserUpdate extends FormRequest
     public function messages()
     {
         return [
+            'id.required' => '用户 ID 不能为空',
+            'id.integer' => '用户 ID 格式不正确',
             'email.required' => '邮箱不能为空',
             'email.email' => '邮箱格式不正确',
             'transfer_enable.numeric' => '流量格式不正确',
@@ -63,6 +67,8 @@ class UserUpdate extends FormRequest
             'balance.integer' => '余额格式不正确',
             'commission_balance.integer' => '佣金格式不正确',
             'password.min' => '密码长度最小8位',
+            'password.max' => '密码长度最大72位',
+            'invite_user_email.email' => '邀请人邮箱格式不正确',
             'speed_limit.integer' => '限速格式不正确'
         ];
     }

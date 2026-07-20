@@ -17,7 +17,7 @@ class SendNoticeWebPushJob implements ShouldQueue, ShouldBeUnique
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     protected $noticeId;
-    public $tries = 3;
+    public $tries = 1;
     public $timeout = 180;
     public $uniqueFor = 300;
 
@@ -32,10 +32,6 @@ class SendNoticeWebPushJob implements ShouldQueue, ShouldBeUnique
         return (string)$this->noticeId;
     }
 
-    public function backoff()
-    {
-        return [15, 60];
-    }
 
     public function handle(WebPushService $webPushService)
     {

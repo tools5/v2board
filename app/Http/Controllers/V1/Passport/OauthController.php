@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\AuthService;
 use App\Services\Oauth\OauthProviderRegistry;
 use App\Services\Oauth\OauthService;
+use App\Support\ConfiguredUrl;
 use Illuminate\Http\Request;
 
 class OauthController extends Controller
@@ -87,7 +88,7 @@ class OauthController extends Controller
 
         $extraQuery = !empty($result['is_new']) ? ['oauth_setup' => 1] : [];
         $loginUrl = $oauthService->createLoginRedirect($user, 'dashboard', $extraQuery);
-        return redirect()->away($loginUrl);
+        return $this->redirectToFrontendUrl($loginUrl);
     }
 
     /**
@@ -147,10 +148,7 @@ class OauthController extends Controller
             'oauth_error' => $isError ? 1 : 0,
         ]);
         $path = $fallbackPath . (strpos($fallbackPath, '?') === false ? '?' : '&') . $query;
-        if (config('v2board.app_url')) {
-            return redirect()->away(rtrim(config('v2board.app_url'), '/') . $path);
-        }
-        return redirect()->away(url($path));
+        return $this->redirectToFrontendPath($path);
     }
 
     /**
@@ -160,7 +158,7 @@ class OauthController extends Controller
      */
     private function popupOrRedirectOnError(string $message)
     {
-        $escapedMessage = json_encode($message, JSON_UNESCAPED_UNICODE);
+        $escapedMessage = $this->jsonForScript($message);
         $fallbackUrl = $this->buildErrorRedirectUrl($message);
         $html = <<<HTML
 <!DOCTYPE html>
@@ -175,7 +173,7 @@ class OauthController extends Controller
         window.opener.postMessage(data, location.origin);
         window.close();
     } else {
-        location.href = {$this->jsonEncode($fallbackUrl)};
+        location.href = {$this->jsonForScript($fallbackUrl)};
     }
 })();
 </script>
@@ -192,7 +190,7 @@ HTML;
      */
     private function popupPostMessage(array $payload)
     {
-        $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
+        $jsonPayload = $this->jsonForScript($payload);
         $html = <<<HTML
 <!DOCTYPE html>
 <html>
@@ -224,15 +222,35 @@ HTML;
             'oauth_error' => 1,
         ]);
         $path = '/#/login?' . $query;
-        if (config('v2board.app_url')) {
-            return rtrim(config('v2board.app_url'), '/') . $path;
-        }
-        return url($path);
+        return ConfiguredUrl::applicationPathUrl($path);
     }
 
-    private function jsonEncode(string $value): string
+    private function redirectToFrontendPath(string $path)
     {
-        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        return $this->redirectToFrontendUrl(ConfiguredUrl::applicationPathUrl($path));
+    }
+
+    private function redirectToFrontendUrl(string $url)
+    {
+        if (strpos($url, '/#/') === 0) {
+            return response('', 302)->header('Location', $url);
+        }
+
+        return redirect()->away($url);
+    }
+
+    private function jsonForScript($value): string
+    {
+        $encoded = json_encode(
+            $value,
+            JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+                | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+        );
+        if ($encoded === false) {
+            throw new \RuntimeException('Unable to encode OAuth popup payload');
+        }
+
+        return $encoded;
     }
 
     private function escapeHtml(string $value): string

@@ -5,6 +5,8 @@ namespace Tests\Unit;
 use App\Http\Requests\Admin\ConfigSave;
 use App\Services\Oauth\OauthProviderRegistry;
 use App\Services\Oauth\OauthService;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Validator;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
@@ -17,10 +19,12 @@ class OauthProviderRegistryTest extends TestCase
     {
         parent::setUp();
         $this->originalV2boardConfig = config('v2board');
+        $this->resetInviteCodeTable();
     }
 
     protected function tearDown(): void
     {
+        Schema::dropIfExists('v2_invite_code');
         config(['v2board' => $this->originalV2boardConfig]);
         parent::tearDown();
     }
@@ -48,6 +52,63 @@ class OauthProviderRegistryTest extends TestCase
                 );
             }
         }
+    }
+
+    public function testApplicationUrlOnlyAcceptsSafeHttpUrls(): void
+    {
+        foreach ([
+            'ftp://panel.example.com',
+            'https://user:password@panel.example.com',
+            "https://panel.example.com\r\nInjected: true",
+        ] as $url) {
+            $validator = $this->validateConfigRequest(['app_url' => $url]);
+            $this->assertTrue($validator->fails(), $url);
+            $this->assertArrayHasKey('app_url', $validator->errors()->toArray());
+        }
+
+        $validator = $this->validateConfigRequest([
+            'app_url' => 'https://panel.example.com/base'
+        ]);
+        $this->assertFalse($validator->fails(), json_encode($validator->errors()->toArray()));
+    }
+
+    public function testExternalConfigurationUrlsRejectUnsafeValues(): void
+    {
+        foreach ([
+            ['logo', 'ftp://cdn.example.com/logo.svg'],
+            ['tos_url', 'https://user:password@docs.example.com/terms'],
+            ['frontend_background_url', 'javascript://attacker.example/image'],
+            ['server_api_url', 'https://api.example.com/%250dInjected'],
+            ['telegram_discuss_link', 'https://chat.example.com/%5Cchannel'],
+            ['windows_download_url', 'https://downloads.example.com/%250dsetup.exe'],
+            ['subscribe_url', 'https://one.example.com,ftp://two.example.com'],
+            ['subscribe_path', '/api/%250dInjected'],
+            ['email_from_address', "sender@example.com\r\nBcc: victim@example.com"],
+        ] as [$field, $value]) {
+            $validator = $this->validateConfigRequest([$field => $value]);
+
+            $this->assertTrue($validator->fails(), $field . ' should fail');
+            $this->assertArrayHasKey($field, $validator->errors()->toArray());
+        }
+    }
+
+    public function testExternalConfigurationUrlsAcceptSafeHttpValues(): void
+    {
+        $validator = $this->validateConfigRequest([
+            'logo' => 'https://cdn.example.com/logo%20file.svg?version=1#preview',
+            'tos_url' => 'https://docs.example.com/terms#full',
+            'frontend_background_url' => 'https://images.example.com/background.jpg?fit=cover',
+            'server_api_url' => 'http://127.0.0.1:8080/api',
+            'telegram_discuss_link' => 'https://chat.example.com/channel',
+            'windows_download_url' => 'https://downloads.example.com/windows.exe',
+            'macos_download_url' => 'https://downloads.example.com/macos.dmg',
+            'android_download_url' => 'https://downloads.example.com/android.apk',
+            'subscribe_url' => 'https://sub-one.example.com,https://sub-two.example.com/base',
+            'subscribe_path' => '/api/v1/client/subscribe',
+            'email_from_address' => 'noreply@example.com',
+        ]);
+
+        $this->assertFalse($validator->fails(), json_encode($validator->errors()->toArray()));
     }
 
     public function testMicrosoftConfigurationIsAccepted(): void
@@ -91,6 +152,22 @@ class OauthProviderRegistryTest extends TestCase
         $validator = $this->validateConfigRequest([
             'login_linuxdo_enable' => 1,
             'login_linuxdo_client_id' => 'updated-id',
+        ]);
+
+        $this->assertFalse($validator->fails(), json_encode($validator->errors()->toArray()));
+    }
+
+    public function testExistingSecretCanBeSubmittedBlankWithoutFailingValidation(): void
+    {
+        config([
+            'v2board.login_linuxdo_client_id' => 'existing-id',
+            'v2board.login_linuxdo_client_secret' => 'existing-secret',
+        ]);
+
+        $validator = $this->validateConfigRequest([
+            'login_linuxdo_enable' => 1,
+            'login_linuxdo_client_id' => 'updated-id',
+            'login_linuxdo_client_secret' => '',
         ]);
 
         $this->assertFalse($validator->fails(), json_encode($validator->errors()->toArray()));
@@ -210,6 +287,20 @@ class OauthProviderRegistryTest extends TestCase
         $this->assertIsArray($stateData);
         $this->assertSame('ABCD1234', $stateData['invite_code'] ?? null);
         $this->assertSame('github', $stateData['provider'] ?? null);
+    }
+
+    private function resetInviteCodeTable(): void
+    {
+        Schema::dropIfExists('v2_invite_code');
+        Schema::create('v2_invite_code', function (Blueprint $table) {
+            $table->increments('id');
+            $table->unsignedInteger('user_id')->default(0);
+            $table->string('code', 32)->unique();
+            $table->boolean('status')->default(false);
+            $table->unsignedInteger('pv')->default(0);
+            $table->unsignedInteger('created_at')->nullable();
+            $table->unsignedInteger('updated_at')->nullable();
+        });
     }
 
     private function validateConfigRequest(array $input): Validator

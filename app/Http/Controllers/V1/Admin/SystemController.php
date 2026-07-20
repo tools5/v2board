@@ -7,8 +7,6 @@ use App\Models\Log as LogModel;
 use App\Utils\CacheKey;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Laravel\Horizon\Contracts\JobRepository;
 use Laravel\Horizon\Contracts\MasterSupervisorRepository;
 use Laravel\Horizon\Contracts\MetricsRepository;
@@ -18,6 +16,8 @@ use Laravel\Horizon\WaitTimeCalculator;
 
 class SystemController extends Controller
 {
+    private const MAX_PAGE_SIZE = 100;
+
     public function getSystemStatus()
     {
         return response([
@@ -38,7 +38,8 @@ class SystemController extends Controller
 
     protected function getScheduleStatus():bool
     {
-        return (time() - 120) < Cache::get(CacheKey::get('SCHEDULE_LAST_CHECK_AT', null));
+        $lastCheckAt = Cache::get(CacheKey::get('SCHEDULE_LAST_CHECK_AT', null));
+        return is_numeric($lastCheckAt) && (time() - 120) < (int)$lastCheckAt;
     }
 
     protected function getHorizonStatus():bool
@@ -103,9 +104,15 @@ class SystemController extends Controller
         })->count();
     }
 
-    public function getSystemLog(Request $request) {
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = $request->input('page_size') >= 10 ? $request->input('page_size') : 10;
+    public function getSystemLog(Request $request)
+    {
+        $payload = $request->validate([
+            'current' => 'nullable|integer|min:1',
+            'page_size' => 'nullable|integer|min:1',
+            'level' => 'nullable|string|max:32'
+        ]);
+        $current = max(1, (int)($payload['current'] ?? 1));
+        $pageSize = min(self::MAX_PAGE_SIZE, max(10, (int)($payload['page_size'] ?? 10)));
         $builder = LogModel::orderBy('created_at', 'DESC')
             ->setFilterAllowKeys('level');
         $total = $builder->count();

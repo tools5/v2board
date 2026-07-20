@@ -1,6 +1,7 @@
 <?php
 namespace App\Protocols\Singbox;
 
+use App\Support\SubscriptionHeaders;
 use App\Utils\Helper;
 
 class Singbox
@@ -18,7 +19,7 @@ class Singbox
 
     public function handle()
     {
-        $appName = config('v2board.app_name', 'V2Board');
+        $appName = SubscriptionHeaders::applicationName();
         $this->config = $this->loadConfig();
         $proxies = $this->buildProxies();
         $outbounds = $this->addProxies($proxies);
@@ -27,10 +28,10 @@ class Singbox
 
         return response(json_encode($this->config, JSON_UNESCAPED_SLASHES), 200)
             ->header('Content-Type', 'application/json')
-            ->header('subscription-userinfo', "upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}")
+            ->header('subscription-userinfo', SubscriptionHeaders::userInfo($user))
             ->header('profile-update-interval', '24')
-            ->header('Profile-Title', 'base64:' . base64_encode($appName))
-            ->header('Content-Disposition', 'attachment; filename="' . $appName . '"');
+            ->header('Profile-Title', SubscriptionHeaders::base64ProfileTitle($appName))
+            ->header('Content-Disposition', SubscriptionHeaders::contentDisposition($appName));
     }
 
     protected function loadConfig()
@@ -423,12 +424,12 @@ class Singbox
         $portConfig = [];
         
         // 检查是否为单端口
-        if (count($parts) === 1 && !str_contains($parts[0], '-')) {
+        if (count($parts) === 1 && strpos($parts[0], '-') === false) {
             $port = (int)$parts[0];
         } else {
             // 处理多端口情况 舍弃单独的端口 只保留范围端口
             foreach ($parts as $part) {
-                if (str_contains($part, '-')) {
+                if (strpos($part, '-') !== false) {
                     $portConfig[] = str_replace('-', ':', $part);
                 }
             }

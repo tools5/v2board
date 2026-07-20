@@ -2,10 +2,13 @@
 
 namespace App\Payments;
 
+use App\Payments\Support\PaymentAmountSupport;
 use \Curl\Curl;
 
 class Epusdt
 {
+    use PaymentAmountSupport;
+
     private $config;
 
     public function __construct($config)
@@ -68,18 +71,23 @@ class Epusdt
 
         $curl = new Curl();
         $curl->setUserAgent('epusdt');
-        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, 0);
+        $curl->setConnectTimeout(10);
+        $curl->setTimeout(30);
+        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, true);
+        $curl->setOpt(CURLOPT_SSL_VERIFYHOST, 2);
         $curl->setOpt(CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
         $curl->post(
             rtrim((string) $this->config['epusdt_url'], '/') . '/payments/gmpay/v1/order/create-transaction',
             json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         );
         $result = $curl->response;
+        $requestFailed = $curl->error;
+        $errorMessage = $curl->errorMessage;
         $curl->close();
 
-        if (!isset($result->status_code) || (int) $result->status_code !== 200) {
-            $message = isset($result->message) ? $result->message : 'epusdt create order failed';
-            abort(500, $message);
+        if ($requestFailed || !is_object($result) || !isset($result->status_code) || (int) $result->status_code !== 200) {
+            report(new \RuntimeException('epusdt create order failed: ' . ($errorMessage ?: 'invalid response')));
+            abort(500, __('Payment gateway request failed'));
         }
 
         $paymentUrl = $result->data->payment_url ?? null;
@@ -97,18 +105,23 @@ class Epusdt
 
             $curl = new Curl();
             $curl->setUserAgent('epusdt');
-            $curl->setOpt(CURLOPT_SSL_VERIFYPEER, 0);
+            $curl->setConnectTimeout(10);
+            $curl->setTimeout(30);
+            $curl->setOpt(CURLOPT_SSL_VERIFYPEER, true);
+            $curl->setOpt(CURLOPT_SSL_VERIFYHOST, 2);
             $curl->setOpt(CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
             $curl->post(
                 rtrim((string) $this->config['epusdt_url'], '/') . '/pay/switch-network',
                 json_encode($switchParams, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
             );
             $switchResult = $curl->response;
+            $requestFailed = $curl->error;
+            $errorMessage = $curl->errorMessage;
             $curl->close();
 
-            if (!isset($switchResult->status_code) || (int) $switchResult->status_code !== 200) {
-                $message = isset($switchResult->message) ? $switchResult->message : 'epusdt switch network failed';
-                abort(500, $message);
+            if ($requestFailed || !is_object($switchResult) || !isset($switchResult->status_code) || (int) $switchResult->status_code !== 200) {
+                report(new \RuntimeException('epusdt switch network failed: ' . ($errorMessage ?: 'invalid response')));
+                abort(500, __('Payment gateway request failed'));
             }
 
             $paymentUrl = $switchResult->data->payment_url ?? $paymentUrl;
@@ -126,24 +139,49 @@ class Epusdt
 
     public function notify($params)
     {
-        if (!isset($params['signature'])) {
-            return false;
+        $requiredFields = ['signature', 'status', 'order_id', 'trade_id', 'amount', 'currency'];
+        if (!$this->hasScalarCallbackFields($params, $requiredFields)
+            || !$this->hasOnlyScalarCallbackValues($params)) {
+            abort(400, 'Required epusdt callback fields are missing');
+        }
+        $token = $this->config['epusdt_token'] ?? null;
+        if (!is_string($token) || trim($token) === '') {
+            abort(400, 'epusdt callback configuration is incomplete');
         }
 
         $signature = strtolower((string) $params['signature']);
         unset($params['signature']);
 
-        if (!hash_equals($this->makeSignature($params, trim((string) ($this->config['epusdt_token'] ?? ''))), $signature)) {
-            return false;
+        if (!hash_equals($this->makeSignature($params, trim($token)), $signature)) {
+            abort(400, 'epusdt callback signature is invalid');
         }
 
-        if (!isset($params['status']) || (int) $params['status'] !== 2) {
-            return 'failed';
+        if (trim((string) $params['status']) !== '2') {
+            return [
+                'acknowledge_only' => true,
+                'custom_result' => 'failed'
+            ];
+        }
+
+        $expectedCurrencyConfig = $this->config['epusdt_currency'] ?? 'CNY';
+        if (!is_string($expectedCurrencyConfig)) {
+            abort(400, 'epusdt callback configuration is incomplete');
+        }
+
+        $amount = $this->decimalToCents($params['amount']);
+        $currency = strtoupper(trim((string) $params['currency']));
+        $expectedCurrency = strtoupper(trim($expectedCurrencyConfig));
+        if ($amount === null || $amount <= 0 || $currency === '' || $expectedCurrency === ''
+            || trim((string) $params['order_id']) === '' || trim((string) $params['trade_id']) === '') {
+            abort(400, 'epusdt callback payment details are invalid');
         }
 
         return [
-            'trade_no' => $params['order_id'],
-            'callback_no' => $params['trade_id'],
+            'trade_no' => (string) $params['order_id'],
+            'callback_no' => (string) $params['trade_id'],
+            'amount' => $amount,
+            'currency' => $currency,
+            'expected_currency' => $expectedCurrency,
             'custom_result' => 'ok',
         ];
     }

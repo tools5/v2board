@@ -26,11 +26,12 @@
 
 # **V2Board**
 
-- PHP7.3+
-- Composer
+- PHP 8.1-8.x（CLI 与 PHP-FPM 使用同一版本）
+- Composer 2.x（必须保留并使用仓库中的 `composer.lock`）
 - MySQL5.5+
 - Redis
 - Laravel
+- AdapterMan 0.7.1（Webman 模式还需要 CLI PHP 启用 `pcntl`）
 
 ## Demo
 [Demo_user](https://v2bdemo.v-50.me/)

@@ -15,18 +15,18 @@
     <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,400i,600,700"> -->
     <script>window.routerBase = "/";</script>
     <script>
-        window.settings = {
-            title: '{{$title}}',
-            theme: {
-                sidebar: '{{$theme_sidebar}}',
-                header: '{{$theme_header}}',
-                color: '{{$theme_color}}',
-            },
-            version: '{{$version}}',
-            background_url: '{{$background_url}}',
-            logo: '{{$logo}}',
-            secure_path: '{{$secure_path}}'
-        }
+        window.settings = @json([
+            'title' => $title,
+            'theme' => [
+                'sidebar' => $theme_sidebar,
+                'header' => $theme_header,
+                'color' => $theme_color,
+            ],
+            'version' => $version,
+            'background_url' => $background_url,
+            'logo' => $logo,
+            'secure_path' => $secure_path,
+        ]);
     </script>
 </head>
 

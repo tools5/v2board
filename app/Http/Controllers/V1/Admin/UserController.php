@@ -16,6 +16,7 @@ use App\Models\TicketMessage;
 use App\Models\User;
 use App\Models\UserOauth;
 use App\Services\AuthService;
+use App\Support\ConfiguredUrl;
 use App\Services\Oauth\OauthProviderRegistry;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -181,50 +182,144 @@ class UserController extends Controller
     public function update(UserUpdate $request)
     {
         $params = $request->validated();
-        $user = User::find($request->input('id'));
-        if (!$user) {
-            abort(500, '用户不存在');
-        }
-        if (User::where('email', $params['email'])->first() && $user->email !== $params['email']) {
-            abort(500, '邮箱已被使用');
-        }
-        if (isset($params['password'])) {
-            $params['password'] = password_hash($params['password'], PASSWORD_DEFAULT);
-            $params['password_algo'] = NULL;
-        } else {
-            unset($params['password']);
-        }
-        if (isset($params['plan_id'])) {
-            $plan = Plan::find($params['plan_id']);
-            if (!$plan) {
-                abort(500, '订阅计划不存在');
+        $revokeSessions = false;
+
+        $user = DB::transaction(function () use ($request, $params, &$revokeSessions) {
+            $user = User::lockForUpdate()->find((int)$params['id']);
+            if (!$user) {
+                abort(404, '用户不存在');
             }
-            $params['group_id'] = $plan->group_id;
-        } else {
-            $params['group_id'] = null;
-        }
-        if ($request->input('invite_user_email')) {
-            $inviteUser = User::where('email', $request->input('invite_user_email'))->first();
-            if ($inviteUser) {
+            if (User::where('email', $params['email'])->where('id', '!=', $user->id)->exists()) {
+                abort(422, '邮箱已被使用');
+            }
+
+            unset($params['id'], $params['invite_user_email']);
+            $passwordChanged = isset($params['password']) && $params['password'] !== '';
+            if ($passwordChanged) {
+                $params['password'] = password_hash($params['password'], PASSWORD_DEFAULT);
+                $params['password_algo'] = null;
+            } else {
+                unset($params['password']);
+            }
+
+            if (isset($params['plan_id'])) {
+                $plan = Plan::find($params['plan_id']);
+                if (!$plan) {
+                    abort(422, '订阅计划不存在');
+                }
+                $params['group_id'] = $plan->group_id;
+            } else {
+                $params['group_id'] = null;
+            }
+
+            $inviteUserEmail = trim((string)$request->input('invite_user_email', ''));
+            if ($inviteUserEmail !== '') {
+                $inviteUser = User::where('email', $inviteUserEmail)->lockForUpdate()->first();
+                if (!$inviteUser) {
+                    abort(404, '邀请人不存在');
+                }
+                $this->assertInviteRelationshipDoesNotCycle($user->id, $inviteUser->id);
                 $params['invite_user_id'] = $inviteUser->id;
+            } else {
+                $params['invite_user_id'] = null;
             }
-        } else {
-            $params['invite_user_id'] = null;
+
+            $revokeSessions = $passwordChanged
+                || (isset($params['banned']) && (int)$params['banned'] === 1)
+                || (isset($params['is_admin']) && (int)$params['is_admin'] !== (int)$user->is_admin)
+                || (isset($params['is_staff']) && (int)$params['is_staff'] !== (int)$user->is_staff);
+
+            try {
+                $saved = $user->fill($params)->save();
+            } catch (\Throwable $e) {
+                report($e);
+                abort(500, '保存失败');
+            }
+            if (!$saved) {
+                abort(500, '保存失败');
+            }
+
+            return $user;
+        });
+
+        if ($revokeSessions) {
+            (new AuthService($user))->removeAllSession();
         }
 
-        if (isset($params['banned']) && (int)$params['banned'] === 1) {
-            $authService = new AuthService($user);
-            $authService->removeAllSession();
-        }
-
-        try {
-            $user->update($params);
-        } catch (\Exception $e) {
-            abort(500, '保存失败');
-        }
         return response([
             'data' => true
         ]);
+    }
+
+    public function setInviteUser(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|min:1',
+            'invite_user_id' => 'nullable|integer|min:1',
+            'invite_user_email' => 'nullable|email:strict|max:255'
+        ]);
+
+        $hasInviteUserId = $request->filled('invite_user_id');
+        $hasInviteUserEmail = $request->filled('invite_user_email');
+        if ($hasInviteUserId && $hasInviteUserEmail) {
+            abort(422, '邀请人 ID 和邮箱只能填写一项');
+        }
+
+        DB::transaction(function () use ($params, $hasInviteUserId, $hasInviteUserEmail) {
+            $user = User::lockForUpdate()->find((int)$params['id']);
+            if (!$user) {
+                abort(404, '用户不存在');
+            }
+
+            $inviteUser = null;
+            if ($hasInviteUserId) {
+                $inviteUser = User::lockForUpdate()->find((int)$params['invite_user_id']);
+            } elseif ($hasInviteUserEmail) {
+                $inviteUser = User::where('email', trim($params['invite_user_email']))
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            if (($hasInviteUserId || $hasInviteUserEmail) && !$inviteUser) {
+                abort(404, '邀请人不存在');
+            }
+
+            if ($inviteUser) {
+                $this->assertInviteRelationshipDoesNotCycle($user->id, $inviteUser->id);
+            }
+
+            $user->invite_user_id = $inviteUser ? $inviteUser->id : null;
+            if (!$user->save()) {
+                abort(500, '保存失败');
+            }
+        });
+
+        return response([
+            'data' => true
+        ]);
+    }
+
+    private function assertInviteRelationshipDoesNotCycle(int $userId, int $inviteUserId): void
+    {
+        $visited = [];
+        $currentUserId = $inviteUserId;
+
+        while ($currentUserId) {
+            if ($currentUserId === $userId) {
+                abort(422, '邀请关系不能引用用户自身或形成循环');
+            }
+            if (isset($visited[$currentUserId])) {
+                abort(422, '现有邀请关系中存在循环，无法保存');
+            }
+
+            $visited[$currentUserId] = true;
+            $currentUser = User::select(['id', 'invite_user_id'])
+                ->lockForUpdate()
+                ->find($currentUserId);
+            $currentUserId = $currentUser && $currentUser->invite_user_id
+                ? (int)$currentUser->invite_user_id
+                : null;
+        }
     }
 
     public function dumpCSV(Request $request)
@@ -347,7 +442,7 @@ class UserController extends Controller
                 'template_name' => 'notify',
                 'template_value' => [
                     'name' => config('v2board.app_name', 'V2Board'),
-                    'url' => config('v2board.app_url'),
+                    'url' => ConfiguredUrl::applicationUrl(),
                     'content' => $request->input('content')
                 ]
             ], 'send_email_mass');

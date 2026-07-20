@@ -1,6 +1,7 @@
 <?php
 namespace App\Protocols\Singbox;
 
+use App\Support\SubscriptionHeaders;
 use App\Utils\Helper;
 
 class SingboxOld
@@ -18,7 +19,7 @@ class SingboxOld
 
     public function handle()
     {
-        $appName = config('v2board.app_name', 'V2Board');
+        $appName = SubscriptionHeaders::applicationName();
         $this->config = $this->loadConfig();
         $proxies = $this->buildProxies();
         $outbounds = $this->addProxies($proxies);
@@ -27,10 +28,10 @@ class SingboxOld
 
         return response(json_encode($this->config, JSON_UNESCAPED_SLASHES), 200)
             ->header('Content-Type', 'application/json')
-            ->header('subscription-userinfo', "upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}")
+            ->header('subscription-userinfo', SubscriptionHeaders::userInfo($user))
             ->header('profile-update-interval', '24')
-            ->header('Profile-Title', 'base64:' . base64_encode($appName))
-            ->header('Content-Disposition', 'attachment; filename="' . $appName . '"');
+            ->header('Profile-Title', SubscriptionHeaders::base64ProfileTitle($appName))
+            ->header('Content-Disposition', SubscriptionHeaders::contentDisposition($appName));
     }
 
     protected function loadConfig()

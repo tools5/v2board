@@ -3,10 +3,22 @@
 namespace App\Http\Requests\Admin;
 
 use App\Services\Oauth\OauthProviderRegistry;
+use App\Support\ConfiguredUrl;
 use Illuminate\Foundation\Http\FormRequest;
 
 class ConfigSave extends FormRequest
 {
+    private const EXTERNAL_HTTP_URL_FIELDS = [
+        'logo',
+        'tos_url',
+        'frontend_background_url',
+        'telegram_discuss_link',
+        'windows_download_url',
+        'macos_download_url',
+        'android_download_url',
+        'server_api_url',
+    ];
+
     const RULES = [
         // deposit
         'deposit_bounus' => [
@@ -32,10 +44,10 @@ class ConfigSave extends FormRequest
         'logo' => 'nullable|url',
         'force_https' => 'in:0,1',
         'stop_register' => 'in:0,1',
-        'app_name' => '',
-        'app_description' => '',
+        'app_name' => 'nullable|string|max:128|not_regex:/[\x00-\x1F\x7F]/',
+        'app_description' => 'nullable|string|max:2048|not_regex:/[\x00-\x1F\x7F]/',
         'app_url' => 'nullable|url',
-        'subscribe_url' => 'nullable',
+        'subscribe_url' => 'nullable|string|max:8192',
         'subscribe_path' => 'nullable|regex:/^\\//',
         'try_out_enable' => 'in:0,1',
         'try_out_plan_id' => 'integer',
@@ -55,7 +67,7 @@ class ConfigSave extends FormRequest
         'show_subscribe_method' => 'in:0,1,2',
         'show_subscribe_expire' => 'nullable|integer',
         // server
-        'server_api_url' => 'nullable|string',
+        'server_api_url' => 'nullable|string|max:2048',
         'server_token' => 'nullable|min:16',
         'server_pull_interval' => 'integer',
         'server_push_interval' => 'integer',
@@ -63,7 +75,7 @@ class ConfigSave extends FormRequest
         'server_node_report_min_traffic' => 'integer', 
         'server_device_online_min_traffic' => 'integer', 
         // frontend
-        'frontend_theme' => '',
+        'frontend_theme' => 'nullable|string|max:64|regex:/^[A-Za-z0-9_-]+$/',
         'frontend_theme_sidebar' => 'nullable|in:dark,light',
         'frontend_theme_header' => 'nullable|in:dark,light',
         'frontend_theme_color' => 'nullable|in:default,darkblue,black,green',
@@ -75,7 +87,7 @@ class ConfigSave extends FormRequest
         'email_username' => '',
         'email_password' => '',
         'email_encryption' => '',
-        'email_from_address' => '',
+        'email_from_address' => 'nullable|email:strict|max:255',
         // 开启邮箱验证时的注册方式：code=验证码，link=邮件链接
         'register_email_mode' => 'in:code,link',
         // telegram
@@ -86,11 +98,11 @@ class ConfigSave extends FormRequest
         'telegram_discuss_link' => 'nullable|url',
         // app
         'windows_version' => '',
-        'windows_download_url' => '',
+        'windows_download_url' => 'nullable|string|max:2048',
         'macos_version' => '',
-        'macos_download_url' => '',
+        'macos_download_url' => 'nullable|string|max:2048',
         'android_version' => '',
-        'android_download_url' => '',
+        'android_download_url' => 'nullable|string|max:2048',
         // safe
         'email_whitelist_enable' => 'in:0,1',
         'email_whitelist_suffix' => 'nullable|array',
@@ -122,6 +134,71 @@ class ConfigSave extends FormRequest
     public function rules()
     {
         $rules = self::allRules();
+        $appendRule = static function ($rule, $extra): array {
+            $items = is_string($rule)
+                ? ($rule === '' ? [] : explode('|', $rule))
+                : (array)$rule;
+            $items[] = $extra;
+
+            return $items;
+        };
+
+        $rules['app_url'] = $appendRule($rules['app_url'], function ($attribute, $value, $fail) {
+            if ($value !== null
+                && $value !== ''
+                && (!is_string($value) || ConfiguredUrl::normalizeHttpUrl($value) === '')) {
+                $fail('站点 URL 必须是无认证信息的 HTTP(S) 地址');
+            }
+        });
+
+        foreach (self::EXTERNAL_HTTP_URL_FIELDS as $field) {
+            $rules[$field] = $appendRule($rules[$field], function ($attribute, $value, $fail) {
+                if ($value !== null
+                    && $value !== ''
+                    && (!is_string($value) || ConfiguredUrl::normalizeExternalHttpUrl($value) === '')) {
+                    $fail('URL 必须是无认证信息的 HTTP(S) 地址');
+                }
+            });
+        }
+
+        $rules['subscribe_url'] = $appendRule($rules['subscribe_url'], function ($attribute, $value, $fail) {
+            if ($value === null || $value === '') {
+                return;
+            }
+            if (!is_string($value)) {
+                $fail('订阅 URL 必须是 HTTP(S) 地址列表');
+
+                return;
+            }
+
+            foreach (explode(',', $value) as $url) {
+                if (trim($url) === '') {
+                    continue;
+                }
+                if (ConfiguredUrl::normalizeExternalHttpUrl($url) === '') {
+                    $fail('订阅 URL 必须是无认证信息的 HTTP(S) 地址列表');
+
+                    return;
+                }
+            }
+        });
+
+        $rules['frontend_theme'] = $appendRule($rules['frontend_theme'], function ($attribute, $value, $fail) {
+            if ($value === null || $value === '') {
+                return;
+            }
+            if (!is_string($value)
+                || !is_dir(public_path('theme') . DIRECTORY_SEPARATOR . $value)) {
+                $fail('前端主题不存在');
+            }
+        });
+        $rules['subscribe_path'] = $appendRule($rules['subscribe_path'], function ($attribute, $value, $fail) {
+            if ($value !== null
+                && $value !== ''
+                && (!is_string($value) || ConfiguredUrl::applicationPathUrl($value) === '')) {
+                $fail('订阅路径无效');
+            }
+        });
 
         $rules['deposit_bounus'][] = function ($attribute, $value, $fail) {
             foreach ($value as $tier) {

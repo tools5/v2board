@@ -21,28 +21,20 @@
     <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,400i,600,700"> -->
     <script>window.routerBase = "/";</script>
     <script>
-        window.settings = {
-            title: '{{$title}}',
-            assets_path: '/theme/{{$theme}}/assets',
-            theme: {
-                sidebar: '{{$theme_config['theme_sidebar']}}',
-                header: '{{$theme_config['theme_header']}}',
-                color: '{{$theme_config['theme_color']}}',
-            },
-            version: '{{$version}}',
-            background_url: '{{$theme_config['background_url']}}',
-            description: '{{$description}}',
-            i18n: [
-                'zh-CN',
-                'en-US',
-                'ja-JP',
-                'vi-VN',
-                'ko-KR',
-                'zh-TW',
-                'fa-IR'
+        window.settings = @json([
+            'title' => $title,
+            'assets_path' => '/theme/' . $theme . '/assets',
+            'theme' => [
+                'sidebar' => $theme_config['theme_sidebar'] ?? 'light',
+                'header' => $theme_config['theme_header'] ?? 'dark',
+                'color' => $theme_config['theme_color'] ?? 'default',
             ],
-            logo: '{{$logo}}'
-        }
+            'version' => $version,
+            'background_url' => $theme_config['background_url'] ?? '',
+            'description' => $description,
+            'i18n' => ['zh-CN', 'en-US', 'ja-JP', 'vi-VN', 'ko-KR', 'zh-TW', 'fa-IR'],
+            'logo' => $logo,
+        ]);
     </script>
     <script src="/theme/{{$theme}}/assets/i18n/zh-CN.js?v={{$version}}"></script>
     <script src="/theme/{{$theme}}/assets/i18n/zh-TW.js?v={{$version}}"></script>

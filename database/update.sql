@@ -342,7 +342,7 @@ ALTER TABLE `v2_user`
 DROP `v2ray_alter_id`,
 DROP `v2ray_level`;
 
-DROP TABLE `v2_server_stat`;
+DROP TABLE IF EXISTS `v2_server_stat`;
 
 CREATE TABLE `v2_stat_server` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -506,7 +506,8 @@ BEGIN
 
 SELECT COUNT(1) INTO IndexIsThere
 FROM INFORMATION_SCHEMA.STATISTICS
-WHERE table_name   = 'v2_stat_user'
+WHERE table_schema = DATABASE()
+  AND   table_name   = 'v2_stat_user'
   AND   index_name   = 'server_id';
 
 IF IndexIsThere != 0 THEN
@@ -859,3 +860,18 @@ CHANGE `action_value` `action_value` text NULL AFTER `action`;
 
 ALTER TABLE `v2_server_v2node`
 ADD `trusted_x_forwarded_for` varchar(255) COLLATE 'utf8mb4_general_ci' NULL COMMENT '信任的x-forwarded-for头部' AFTER `network_settings`;
+
+CREATE TABLE IF NOT EXISTS `v2_job_idempotency` (
+  `scope` varchar(64) NOT NULL,
+  `job_id` varchar(64) NOT NULL,
+  `created_at` int(10) unsigned NOT NULL,
+  PRIMARY KEY (`scope`, `job_id`),
+  KEY `v2_job_idempotency_created_at_index` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `v2_sql_patch` (
+  `checksum` char(64) NOT NULL,
+  `filename` varchar(255) NOT NULL,
+  `applied_at` int(10) unsigned NOT NULL,
+  PRIMARY KEY (`checksum`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\V1\Server;
 
+use App\Support\EtagMatcher;
+
 use App\Http\Controllers\Controller;
 use App\Models\ServerShadowsocks;
 use App\Services\ServerService;
@@ -19,11 +21,10 @@ class ShadowsocksTidalabController extends Controller
     public function __construct(Request $request)
     {
         $token = $request->input('token');
-        if (empty($token)) {
-            abort(500, 'token is null');
-        }
-        if ($token !== config('v2board.server_token')) {
-            abort(500, 'token is error');
+        $configuredToken = (string)config('v2board.server_token', '');
+        if (!is_string($token) || $token === '' || $configuredToken === ''
+            || !hash_equals($configuredToken, $token)) {
+            abort(403, 'token is error');
         }
     }
 
@@ -49,8 +50,8 @@ class ShadowsocksTidalabController extends Controller
             ]);
         }
         $eTag = sha1(json_encode($result));
-        if (strpos($request->header('If-None-Match'), $eTag) !== false ) {
-            abort(304);
+        if (EtagMatcher::matches($request->header('If-None-Match'), $eTag)) {
+            return response('', 304)->header('ETag', "\"{$eTag}\"");
         }
         return response([
             'data' => $result

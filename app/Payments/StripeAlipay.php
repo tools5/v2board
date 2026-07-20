@@ -1,14 +1,18 @@
 <?php
 
-/**
- * 自己写别抄，抄NMB抄
- */
 namespace App\Payments;
 
+use App\Payments\Support\StripeSupport;
+use Stripe\Charge;
 use Stripe\Source;
 use Stripe\Stripe;
 
-class StripeAlipay {
+class StripeAlipay
+{
+    use StripeSupport;
+
+    protected $config;
+
     public function __construct($config)
     {
         $this->config = $config;
@@ -37,81 +41,96 @@ class StripeAlipay {
 
     public function pay($order)
     {
-        $currency = $this->config['currency'];
-        $exchange = $this->exchange('CNY', strtoupper($currency));
-        if (!$exchange) {
-            abort(500, __('Currency conversion has timed out, please try again later'));
-        }
-        Stripe::setApiKey($this->config['stripe_sk_live']);
-        $source = Source::create([
-            'amount' => floor($order['total_amount'] * $exchange),
-            'currency' => $currency,
-            'type' => 'alipay',
-            'statement_descriptor' => $order['trade_no'],
-            'metadata' => [
-                'user_id' => $order['user_id'],
-                'out_trade_no' => $order['trade_no'],
-                'identifier' => ''
-            ],
-            'redirect' => [
-                'return_url' => $order['return_url']
-            ]
-        ]);
-        if (!$source['redirect']['url']) {
+        $currency = $this->stripeCurrency();
+        $amount = $this->stripeAmount(
+            $order,
+            $this->stripeExchangeRate('CNY', $currency),
+            $currency
+        );
+        Stripe::setApiKey($this->stripeSecretKey());
+
+        try {
+            $source = Source::create([
+                'amount' => $amount,
+                'currency' => strtolower($currency),
+                'type' => 'alipay',
+                'statement_descriptor' => (string) $order['trade_no'],
+                'metadata' => $this->stripeMetadata($order, $amount, $currency, 'stripe_alipay'),
+                'redirect' => [
+                    'return_url' => $order['return_url']
+                ]
+            ], $this->stripeIdempotencyOptions('alipay-source', $order['trade_no']));
+        } catch (\Throwable $e) {
+            report($e);
             abort(500, __('Payment gateway request failed'));
         }
+
+        $redirectUrl = $this->stripeValue($this->stripeValue($source, 'redirect'), 'url');
+        if (!$redirectUrl) {
+            abort(500, __('Payment gateway request failed'));
+        }
+
         return [
             'type' => 1,
-            'data' => $source['redirect']['url']
+            'data' => $redirectUrl
         ];
     }
 
     public function notify($params)
     {
-        \Stripe\Stripe::setApiKey($this->config['stripe_sk_live']);
-        try {
-            $event = \Stripe\Webhook::constructEvent(
-                request()->getContent() ?: json_encode($_POST),
-                $_SERVER['HTTP_STRIPE_SIGNATURE'],
-                $this->config['stripe_webhook_key']
-            );
-        } catch (\Stripe\Error\SignatureVerification $e) {
-            abort(400);
-        }
-        switch ($event->type) {
-            case 'source.chargeable':
-                $object = $event->data->object;
-                \Stripe\Charge::create([
-                    'amount' => $object->amount,
-                    'currency' => $object->currency,
-                    'source' => $object->id,
-                    'metadata' => json_decode($object->metadata, true)
-                ]);
-                break;
-            case 'charge.succeeded':
-                $object = $event->data->object;
-                if ($object->status === 'succeeded') {
-                    if (!isset($object->metadata->out_trade_no) && !isset($object->source->metadata)) {
-                        return('order error');
-                    }
-                    $metaData = isset($object->metadata->out_trade_no) ? $object->metadata : $object->source->metadata;
-                    $tradeNo = $metaData->out_trade_no;
-                    return [
-                        'trade_no' => $tradeNo,
-                        'callback_no' => $object->id
-                    ];
-                }
-                break;
-            default:
-                abort(500, 'event is not support');
-        }
-        return('success');
-    }
+        Stripe::setApiKey($this->stripeSecretKey());
+        $event = $this->stripeWebhookEvent();
 
-    private function exchange($from, $to)
-    {
-        $result = file_get_contents('https://api.exchangerate.host/latest?symbols=' . $to . '&base=' . $from);
-        $result = json_decode($result, true);
-        return $result['rates'][$to];
+        if ($event->type === 'source.chargeable') {
+            $source = $event->data->object;
+            if ($this->stripeValue($source, 'type') !== 'alipay') {
+                return $this->stripeAcknowledgeOnly();
+            }
+
+            $metadata = $this->stripeMetadataFrom($source);
+            if (!$this->stripeMetadataMatchesGateway($metadata, 'stripe_alipay')) {
+                return $this->stripeAcknowledgeOnly();
+            }
+            $validation = $this->stripeCallbackResult(
+                $metadata,
+                '',
+                $this->stripeValue($source, 'id'),
+                $this->stripeValue($source, 'amount'),
+                $this->stripeValue($source, 'currency')
+            );
+            if (!empty($validation['acknowledge_only'])) {
+                return $validation;
+            }
+
+            Charge::create([
+                'amount' => (int) $this->stripeValue($source, 'amount'),
+                'currency' => strtolower((string) $this->stripeValue($source, 'currency')),
+                'source' => (string) $this->stripeValue($source, 'id'),
+                'metadata' => $this->stripeObjectToArray($metadata)
+            ], $this->stripeIdempotencyOptions('alipay-charge', $this->stripeValue($source, 'id')));
+
+            return $this->stripeAcknowledgeOnly();
+        }
+
+        if ($event->type !== 'charge.succeeded') {
+            return $this->stripeAcknowledgeOnly();
+        }
+
+        $charge = $event->data->object;
+        if ($this->stripeValue($charge, 'status') !== 'succeeded') {
+            return $this->stripeAcknowledgeOnly();
+        }
+        $metadata = $this->stripeChargeMetadata($charge);
+        if (!$this->stripeMetadataMatchesGateway($metadata, 'stripe_alipay')) {
+            return $this->stripeAcknowledgeOnly();
+        }
+
+        return $this->stripeCallbackResult(
+            $metadata,
+            '',
+            $this->stripeValue($charge, 'id'),
+            $this->stripeValue($charge, 'amount'),
+            $this->stripeValue($charge, 'currency')
+        );
     }
 }

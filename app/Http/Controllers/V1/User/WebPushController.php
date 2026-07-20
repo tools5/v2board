@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\V1\User;
 
+use App\Exceptions\WebPushEndpointResolutionException;
 use App\Http\Controllers\Controller;
 use App\Models\WebPushSubscription;
 use App\Services\WebPushService;
@@ -98,8 +99,16 @@ class WebPushController extends Controller
             'content_encoding.in' => '当前浏览器的推送加密格式不受支持',
         ]);
 
-        if (!$this->isAllowedEndpoint($data['endpoint'])) {
-            abort(422, '推送订阅地址无效');
+        try {
+            $this->webPushService->assertValidSubscription(
+                $data['endpoint'],
+                $data['keys']['p256dh'],
+                $data['keys']['auth']
+            );
+        } catch (WebPushEndpointResolutionException $error) {
+            abort(503, '暂时无法验证浏览器推送服务，请稍后重试');
+        } catch (\InvalidArgumentException $error) {
+            abort(422, $error->getMessage());
         }
 
         $endpoint = $data['endpoint'];
@@ -242,41 +251,4 @@ class WebPushController extends Controller
         return $browser . ' · ' . $platform;
     }
 
-    private function isAllowedEndpoint($endpoint)
-    {
-        $parts = parse_url($endpoint);
-        if (!is_array($parts)
-            || strtolower($parts['scheme'] ?? '') !== 'https'
-            || empty($parts['host'])
-            || isset($parts['user'])
-            || isset($parts['pass'])
-            || (isset($parts['port']) && (int)$parts['port'] !== 443)
-        ) {
-            return false;
-        }
-
-        $host = strtolower(rtrim($parts['host'], '.'));
-        if ($host === 'localhost') {
-            return false;
-        }
-
-        foreach (['.localhost', '.local', '.internal', '.lan', '.home'] as $suffix) {
-            if (substr($host, -strlen($suffix)) === $suffix) {
-                return false;
-            }
-        }
-
-        if (filter_var($host, FILTER_VALIDATE_IP)) {
-            return filter_var(
-                $host,
-                FILTER_VALIDATE_IP,
-                FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
-            ) !== false;
-        }
-
-        return (bool)preg_match(
-            '/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i',
-            $host
-        );
-    }
 }

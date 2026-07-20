@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class GiftcardGenerate extends FormRequest
 {
@@ -13,16 +14,25 @@ class GiftcardGenerate extends FormRequest
      */
     public function rules()
     {
+        $giftcardId = $this->input('id');
+
         return [
-            'generate_count' => 'nullable|integer|max:500',
-            'name' => 'required',
+            'id' => 'nullable|integer|min:1',
+            'generate_count' => 'nullable|integer|min:1|max:500',
+            'name' => 'required|string|max:255',
             'type' => 'required|in:1,2,3,4,5',
-            'value' => ['required_if:type,1,2,3,5', 'nullable', 'integer'],
-            'plan_id' => ['required_if:type,5', 'nullable','integer'],
+            'value' => ['required_if:type,1,2,3,5', 'nullable', 'integer', 'min:0'],
+            'plan_id' => ['required_if:type,5', 'nullable', 'integer', 'exists:v2_plan,id'],
             'started_at' => 'required|integer',
-            'ended_at' => 'required|integer',
-            'limit_use' => 'nullable|integer',
-            'code' => ''
+            'ended_at' => 'required|integer|gt:started_at',
+            'limit_use' => 'nullable|integer|min:1',
+            'code' => [
+                'nullable',
+                'string',
+                'max:64',
+                'regex:/^[^\\x00-\\x1F\\x7F]+$/u',
+                Rule::unique('v2_giftcard', 'code')->ignore($giftcardId)
+            ]
         ];
     }
 

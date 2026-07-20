@@ -14,9 +14,9 @@ class TicketSave extends FormRequest
     public function rules()
     {
         return [
-            'subject' => 'required',
+            'subject' => 'required|string|max:255',
             'level' => 'required|in:0,1,2',
-            'message' => 'required'
+            'message' => 'required|string|max:20000'
         ];
     }
 

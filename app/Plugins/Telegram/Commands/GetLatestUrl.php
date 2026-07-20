@@ -3,6 +3,7 @@
 namespace App\Plugins\Telegram\Commands;
 
 use App\Models\User;
+use App\Support\ConfiguredUrl;
 use App\Plugins\Telegram\Telegram;
 
 class GetLatestUrl extends Telegram {
@@ -14,7 +15,7 @@ class GetLatestUrl extends Telegram {
         $text = sprintf(
             "%s的最新网址是：%s",
             config('v2board.app_name', 'V2Board'),
-            config('v2board.app_url')
+            ConfiguredUrl::applicationUrl()
         );
         $telegramService->sendMessage($message->chat_id, $text, 'markdown');
     }

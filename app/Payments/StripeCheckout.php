@@ -2,10 +2,16 @@
 
 namespace App\Payments;
 
-use Stripe\Stripe;
+use App\Payments\Support\StripeSupport;
 use Stripe\Checkout\Session;
+use Stripe\Stripe;
 
-class StripeCheckout {
+class StripeCheckout
+{
+    use StripeSupport;
+
+    protected $config;
+
     public function __construct($config)
     {
         $this->config = $config;
@@ -44,25 +50,34 @@ class StripeCheckout {
 
     public function pay($order)
     {
-        $currency = $this->config['currency'];
-        $exchange = $this->exchange('CNY', strtoupper($currency));
-        if (!$exchange) {
-            abort(500, __('Currency conversion has timed out, please try again later'));
+        $currency = $this->stripeCurrency();
+        $amount = $this->stripeAmount(
+            $order,
+            $this->stripeExchangeRate('CNY', $currency),
+            $currency
+        );
+        $metadata = $this->stripeMetadata($order, $amount, $currency, 'stripe_checkout');
+        $customFieldName = trim((string) ($this->config['stripe_custom_field_name'] ?? ''));
+        if ($customFieldName === '') {
+            $customFieldName = 'Contact Information';
         }
-        $customFieldName = isset($this->config['stripe_custom_field_name']) ? $this->config['stripe_custom_field_name'] : 'Contact Infomation';
 
         $params = [
             'success_url' => $order['return_url'],
             'cancel_url' => $order['return_url'],
-            'client_reference_id' => $order['trade_no'],
+            'client_reference_id' => (string) $order['trade_no'],
+            'metadata' => $metadata,
+            'payment_intent_data' => [
+                'metadata' => $metadata
+            ],
             'line_items' => [
                 [
                     'price_data' => [
-                        'currency' => $currency,
+                        'currency' => strtolower($currency),
                         'product_data' => [
-                            'name' => $order['trade_no']
+                            'name' => (string) $order['trade_no']
                         ],
-                        'unit_amount' => floor($order['total_amount'] * $exchange)
+                        'unit_amount' => $amount
                     ],
                     'quantity' => 1
                 ]
@@ -76,64 +91,55 @@ class StripeCheckout {
                     'label' => ['type' => 'custom', 'custom' => $customFieldName],
                     'type' => 'text',
                 ],
-            ],
-            // 'customer_email' => $user['email'] not support
-
+            ]
         ];
 
-        Stripe::setApiKey($this->config['stripe_sk_live']);
+        Stripe::setApiKey($this->stripeSecretKey());
         try {
-            $session = Session::create($params);
-        } catch (\Exception $e) {
-            info($e);
-            abort(500, "Failed to create order. Error: {$e->getMessage}");
+            $session = Session::create(
+                $params,
+                $this->stripeIdempotencyOptions('checkout-session', $order['trade_no'])
+            );
+        } catch (\Throwable $e) {
+            report($e);
+            abort(500, __('Failed to create order'));
         }
+
+        if (!$session->url) {
+            abort(500, __('Payment gateway request failed'));
+        }
+
         return [
-            'type' => 1, // 0:qrcode 1:url
+            'type' => 1,
             'data' => $session->url
         ];
     }
 
     public function notify($params)
     {
-        \Stripe\Stripe::setApiKey($this->config['stripe_sk_live']);
-        try {
-            $event = \Stripe\Webhook::constructEvent(
-                request()->getContent() ?: json_encode($_POST),
-                $_SERVER['HTTP_STRIPE_SIGNATURE'],
-                $this->config['stripe_webhook_key']
-            );
-        } catch (\Stripe\Error\SignatureVerification $e) {
-            abort(400);
+        $event = $this->stripeWebhookEvent();
+        if (!in_array($event->type, [
+            'checkout.session.completed',
+            'checkout.session.async_payment_succeeded'
+        ], true)) {
+            return $this->stripeAcknowledgeOnly();
         }
 
-        switch ($event->type) {
-            case 'checkout.session.completed':
-                $object = $event->data->object;
-                if ($object->payment_status === 'paid') {
-                    return [
-                        'trade_no' => $object->client_reference_id,
-                        'callback_no' => $object->payment_intent
-                    ];
-                }
-                break;
-            case 'checkout.session.async_payment_succeeded':
-                $object = $event->data->object;
-                return [
-                    'trade_no' => $object->client_reference_id,
-                    'callback_no' => $object->payment_intent
-                ];
-                break;
-            default:
-                abort(500, 'event is not support');
+        $session = $event->data->object;
+        if ($this->stripeValue($session, 'payment_status') !== 'paid') {
+            return $this->stripeAcknowledgeOnly();
         }
-        return('success');
-    }
+        $metadata = $this->stripeMetadataFrom($session);
+        if (!$this->stripeMetadataMatchesGateway($metadata, 'stripe_checkout')) {
+            return $this->stripeAcknowledgeOnly();
+        }
 
-    private function exchange($from, $to)
-    {
-        $result = file_get_contents("https://api.exchangerate-api.com/v4/latest/{$from}");
-        $result = json_decode($result, true);
-        return $result['rates'][$to];
+        return $this->stripeCallbackResult(
+            $metadata,
+            $this->stripeValue($session, 'client_reference_id'),
+            $this->stripeValue($session, 'payment_intent'),
+            $this->stripeValue($session, 'amount_total'),
+            $this->stripeValue($session, 'currency')
+        );
     }
 }

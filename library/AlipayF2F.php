@@ -22,26 +22,37 @@ class AlipayF2F {
         if (is_string($data)) {
             parse_str($data, $data);
         }
-        $sign = $data['sign'];
+        if (!is_array($data) || empty($data['sign'])) {
+            return false;
+        }
+        foreach ($data as $value) {
+            if ($value !== null && !is_string($value) && !is_int($value) && !is_float($value)) {
+                return false;
+            }
+        }
+
+        $sign = base64_decode((string) $data['sign'], true);
+        if ($sign === false) {
+            return false;
+        }
         unset($data['sign']);
         unset($data['sign_type']);
         ksort($data);
         $data = $this->buildQuery($data);
-        $res = "-----BEGIN PUBLIC KEY-----\n" .
-            wordwrap($this->alipayPublicKey, 64, "\n", true) .
-            "\n-----END PUBLIC KEY-----";
-        if ("RSA2" == $this->signType) {
-            $result = (openssl_verify($data, base64_decode($sign), $res, OPENSSL_ALGO_SHA256) === 1);
-        } else {
-            $result = (openssl_verify($data, base64_decode($sign), $res) === 1);
-        }
-        openssl_free_key(openssl_get_publickey($res));
+        $publicKey = $this->loadPublicKey($this->alipayPublicKey);
+        $algorithm = $this->signType === 'RSA2' ? OPENSSL_ALGO_SHA256 : OPENSSL_ALGO_SHA1;
+        $result = openssl_verify($data, $sign, $publicKey, $algorithm) === 1;
+        openssl_pkey_free($publicKey);
+
         return $result;
     }
 
     public function setBizContent($bizContent = [])
     {
-        $this->bizContent = json_encode($bizContent);
+        $this->bizContent = json_encode($bizContent, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($this->bizContent === false) {
+            throw new \InvalidArgumentException('支付宝业务参数编码失败');
+        }
     }
 
     public function setMethod($method)
@@ -71,11 +82,19 @@ class AlipayF2F {
 
     public function send()
     {
-        $response = Http::get('https://openapi.alipay.com/gateway.do', $this->buildParam())->json();
+        $response = Http::withOptions(['connect_timeout' => 10])
+            ->timeout(30)
+            ->get('https://openapi.alipay.com/gateway.do', $this->buildParam())
+            ->throw()
+            ->json();
         $resKey = str_replace('.', '_', $this->method) . '_response';
-        if (!isset($response[$resKey])) throw new \Exception('从支付宝请求失败');
+        if (!is_array($response) || !isset($response[$resKey]) || !is_array($response[$resKey])) {
+            throw new \RuntimeException('从支付宝请求失败');
+        }
         $response = $response[$resKey];
-        if ($response['msg'] !== 'Success') throw new \Exception($response['sub_msg']);
+        if (($response['msg'] ?? null) !== 'Success') {
+            throw new \RuntimeException((string) ($response['sub_msg'] ?? '支付宝返回失败'));
+        }
         $this->response = $response;
     }
 
@@ -98,7 +117,7 @@ class AlipayF2F {
             'method' => $this->method,
             'charset' => 'UTF-8',
             'sign_type' => $this->signType,
-            'timestamp' => date('Y-m-d H:m:s'),
+            'timestamp' => date('Y-m-d H:i:s'),
             'biz_content' => $this->bizContent,
             'version' => '1.0',
             '_input_charset' => 'UTF-8'
@@ -120,6 +139,9 @@ class AlipayF2F {
         //重新组装参数
         $params = array();
         foreach ($query as $key => $value) {
+            if ($value === '' || $value === null) {
+                continue;
+            }
             $params[] = $key . '=' . $value;
         }
         $data = implode('&', $params);
@@ -128,37 +150,93 @@ class AlipayF2F {
 
     private function buildSign(string $signData): string
     {
-        $privateKey = $this->privateKey;
-        $p_key = array();
-        //如果私钥是 1行
-        if (!stripos($privateKey, "\n")) {
-            $i = 0;
-            while ($key_str = substr($privateKey, $i * 64, 64)) {
-                $p_key[] = $key_str;
-                $i++;
+        $privateKey = $this->loadPrivateKey($this->privateKey);
+        $signature = '';
+        $algorithm = $this->signType === 'RSA2' ? OPENSSL_ALGO_SHA256 : OPENSSL_ALGO_SHA1;
+        if (!openssl_sign($signData, $signature, $privateKey, $algorithm)) {
+            openssl_pkey_free($privateKey);
+            throw new \RuntimeException('支付宝请求签名失败');
+        }
+        openssl_pkey_free($privateKey);
+
+        return base64_encode($signature);
+    }
+
+    private function loadPrivateKey($key)
+    {
+        $key = $this->readKeyMaterial($key);
+        $candidates = [$key];
+        if (strpos($key, '-----BEGIN') === false) {
+            $body = preg_replace('/\s+/', '', $key);
+            if (!is_string($body) || $body === '') {
+                throw new \RuntimeException('支付宝私钥无效');
+            }
+            $body = wordwrap($body, 64, "\n", true);
+            $candidates = [
+                "-----BEGIN PRIVATE KEY-----\n{$body}\n-----END PRIVATE KEY-----",
+                "-----BEGIN RSA PRIVATE KEY-----\n{$body}\n-----END RSA PRIVATE KEY-----"
+            ];
+        }
+
+        foreach ($candidates as $candidate) {
+            $privateKey = @openssl_pkey_get_private($candidate);
+            if ($privateKey !== false) {
+                return $privateKey;
             }
         }
-        $privateKey = "-----BEGIN RSA PRIVATE KEY-----\n" . implode("\n", $p_key);
-        $privateKey = $privateKey . "\n-----END RSA PRIVATE KEY-----";
 
-        //私钥
-        $privateId = openssl_pkey_get_private($privateKey, '');
+        throw new \RuntimeException('支付宝私钥无效');
+    }
 
-        // 签名
-        $signature = '';
-
-        if ("RSA2" == $this->signType) {
-
-            openssl_sign($signData, $signature, $privateId, OPENSSL_ALGO_SHA256);
-        } else {
-
-            openssl_sign($signData, $signature, $privateId, OPENSSL_ALGO_SHA1);
+    private function loadPublicKey($key)
+    {
+        $key = $this->readKeyMaterial($key);
+        $candidates = [$key];
+        if (strpos($key, '-----BEGIN') === false) {
+            $body = preg_replace('/\s+/', '', $key);
+            if (!is_string($body) || $body === '') {
+                throw new \RuntimeException('支付宝公钥无效');
+            }
+            $body = wordwrap($body, 64, "\n", true);
+            $candidates = [
+                "-----BEGIN PUBLIC KEY-----\n{$body}\n-----END PUBLIC KEY-----",
+                "-----BEGIN RSA PUBLIC KEY-----\n{$body}\n-----END RSA PUBLIC KEY-----"
+            ];
         }
 
-        openssl_free_key($privateId);
+        foreach ($candidates as $candidate) {
+            $publicKey = @openssl_pkey_get_public($candidate);
+            if ($publicKey !== false) {
+                return $publicKey;
+            }
+        }
 
-        //加密后的内容通常含有特殊字符，需要编码转换下
-        $signature = base64_encode($signature);
-        return $signature;
+        throw new \RuntimeException('支付宝公钥无效');
+    }
+
+    private function readKeyMaterial($key): string
+    {
+        $key = trim((string) $key);
+        if ($key === '') {
+            throw new \RuntimeException('支付宝密钥不能为空');
+        }
+        $looksLikeInlineKey = strpos($key, '-----BEGIN') !== false
+            || (strlen($key) >= 128 && preg_match('/\A[A-Za-z0-9+\/=\s]+\z/', $key) === 1);
+        $maxPathLength = defined('PHP_MAXPATHLEN') ? PHP_MAXPATHLEN : 4096;
+        $isSafePath = !$looksLikeInlineKey
+            && strpos($key, "\0") === false
+            && strlen($key) <= $maxPathLength;
+        if ($isSafePath && is_file($key)) {
+            if (!is_readable($key)) {
+                throw new \RuntimeException('支付宝密钥不可读');
+            }
+            $contents = file_get_contents($key);
+            if ($contents === false) {
+                throw new \RuntimeException('支付宝密钥读取失败');
+            }
+            $key = trim($contents);
+        }
+
+        return str_replace("\r\n", "\n", $key);
     }
 }

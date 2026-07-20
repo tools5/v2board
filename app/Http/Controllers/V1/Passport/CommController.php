@@ -7,6 +7,7 @@ use App\Http\Requests\Passport\CommSendEmailVerify;
 use App\Jobs\SendEmailJob;
 use App\Models\InviteCode;
 use App\Models\User;
+use App\Support\ConfiguredUrl;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
@@ -20,10 +21,16 @@ class CommController extends Controller
     public function sendEmailVerify(CommSendEmailVerify $request)
     {
         $ip = $request->ip();
-        if (RateLimiter::tooManyAttempts($ip, 3)) {
+        $email = (string)$request->input('email');
+        $cacheKeyEmail = strtolower(trim($email));
+        $ipRateKey = 'email_verify:ip:' . $ip;
+        $emailRateKey = 'email_verify:email:' . hash('sha256', $cacheKeyEmail);
+        if (RateLimiter::tooManyAttempts($ipRateKey, 3)
+            || RateLimiter::tooManyAttempts($emailRateKey, 3)) {
             abort(429, __('Too many requests, please try again later.'));
         }
-        RateLimiter::hit($ip, 60);
+        RateLimiter::hit($ipRateKey, 60);
+        RateLimiter::hit($emailRateKey, 60);
 
         if ((int)config('v2board.recaptcha_enable', 0)) {
             $recaptcha = new ReCaptcha(config('v2board.recaptcha_key'));
@@ -32,8 +39,6 @@ class CommController extends Controller
                 abort(500, __('Invalid code is incorrect'));
             }
         }
-        $email = $request->input('email');
-        $cacheKeyEmail = strtolower(trim((string)$email));
         $isforget = $request->input('isforget');
         $email_exists = User::where('email', $email)->exists();
         //检查是否在白名单内
@@ -76,7 +81,7 @@ class CommController extends Controller
         if (Cache::get(CacheKey::get('LAST_SEND_EMAIL_VERIFY_TIMESTAMP', $cacheKeyEmail))) {
             abort(500, __('Email verification code has been sent, please request again later'));
         }
-        $code = (string)rand(100000, 999999);
+        $code = (string)random_int(100000, 999999);
         $subject = config('v2board.app_name', 'V2Board') . __('Email verification code');
 
         SendEmailJob::dispatch([
@@ -86,7 +91,7 @@ class CommController extends Controller
             'template_value' => [
                 'name' => config('v2board.app_name', 'V2Board'),
                 'code' => $code,
-                'url' => config('v2board.app_url')
+                'url' => ConfiguredUrl::applicationUrl()
             ]
         ]);
 

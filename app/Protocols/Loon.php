@@ -2,6 +2,7 @@
 
 namespace App\Protocols;
 
+use App\Support\SubscriptionHeaders;
 use App\Utils\Helper;
 
 class Loon
@@ -22,7 +23,7 @@ class Loon
         $user = $this->user;
 
         $uri = '';
-        header("Subscription-Userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
+        SubscriptionHeaders::send('Subscription-Userinfo', SubscriptionHeaders::userInfo($user));
 
         foreach ($servers as $item) {
             if (($item['type'] ?? null) === 'v2node' && isset($item['protocol'])) {

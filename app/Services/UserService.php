@@ -56,6 +56,7 @@ class UserService
             if ($user->plan_id === NULL) return null;
             $user->plan = Plan::find($user->plan_id);
         }
+        if (!$user->plan) return null;
         if ($user->expired_at <= time() || $user->expired_at === NULL) return null;
         // if reset method is not reset
         if ($user->plan->reset_traffic_method === 2) return null;
@@ -104,6 +105,7 @@ class UserService
     {
         if ($user->plan_id === NULL) return null;
         $plan = Plan::find($user->plan_id);
+        if (!$plan) return null;
         if ($user->expired_at <= time() || $user->expired_at === NULL) return null;
         // if reset method is not reset
         if ($plan->reset_traffic_method === 2) return null;

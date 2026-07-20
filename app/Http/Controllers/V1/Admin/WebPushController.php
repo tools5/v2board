@@ -10,6 +10,8 @@ use App\Models\WebPushMessage;
 use App\Models\WebPushSubscription;
 use App\Services\WebPushService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class WebPushController extends Controller
 {
@@ -29,32 +31,14 @@ class WebPushController extends Controller
                 'configured' => $this->webPushService->isConfigured(),
                 'enabled' => (bool)$settings['enabled'],
                 'public_key' => (string)$settings['public_key'],
+                'private_key_configured' => (string)$settings['private_key'] !== '',
                 'subscription_count' => WebPushSubscription::count(),
                 'user_count' => WebPushSubscription::distinct('user_id')->count('user_id'),
                 'message_count' => WebPushMessage::count(),
                 'default_icon' => $this->webPushService->defaultIconUrl(),
                 'default_url' => $this->webPushService->defaultClickUrl(),
                 'plans' => Plan::orderBy('sort', 'ASC')->get(['id', 'name']),
-                'settings' => [
-                    'enabled' => (bool)$settings['enabled'],
-                    'vapid_subject' => (string)$settings['vapid_subject'],
-                    'public_key' => (string)$settings['public_key'],
-                    // Never expose private key fully in list views; still needed for edit form.
-                    'private_key' => (string)$settings['private_key'],
-                    'ttl' => (int)$settings['ttl'],
-                    'urgency' => (string)$settings['urgency'],
-                    'batch_size' => (int)$settings['batch_size'],
-                    'request_timeout' => (int)$settings['request_timeout'],
-                    'proxy' => (string)$settings['proxy'],
-                    'ca_bundle' => (string)$settings['ca_bundle'],
-                    'remind_expire' => (bool)$settings['remind_expire'],
-                    'remind_traffic' => (bool)$settings['remind_traffic'],
-                    'remind_expire_days' => (string)$settings['remind_expire_days'],
-                    'remind_traffic_percent' => (int)$settings['remind_traffic_percent'],
-                    'remind_expire_url' => (string)$settings['remind_expire_url'],
-                    'remind_traffic_url' => (string)$settings['remind_traffic_url'],
-                    'source' => (string)$settings['source'],
-                ],
+                'settings' => $this->publicSettings($settings),
             ],
         ]);
     }
@@ -64,40 +48,19 @@ class WebPushController extends Controller
         try {
             $settings = $this->webPushService->saveSettings($request->all());
         } catch (\InvalidArgumentException $error) {
-            abort(500, $error->getMessage());
-        } catch (\RuntimeException $error) {
-            abort(500, $error->getMessage());
+            abort(422, $error->getMessage());
         } catch (\Throwable $error) {
-            \Log::error('Web Push saveSettings failed', [
-                'message' => $error->getMessage(),
-                'file' => $error->getFile(),
-                'line' => $error->getLine(),
+            Log::error('Web Push settings save failed', [
+                'exception' => $error,
             ]);
-            abort(500, '保存失败：' . $error->getMessage());
+            abort(500, 'Web Push 配置保存失败，请检查 storage 写入权限和服务器日志');
         }
 
         return response([
             'data' => [
                 'configured' => $this->webPushService->isConfigured(),
-                'settings' => [
-                    'enabled' => (bool)$settings['enabled'],
-                    'vapid_subject' => (string)$settings['vapid_subject'],
-                    'public_key' => (string)$settings['public_key'],
-                    'private_key' => (string)$settings['private_key'],
-                    'ttl' => (int)$settings['ttl'],
-                    'urgency' => (string)$settings['urgency'],
-                    'batch_size' => (int)$settings['batch_size'],
-                    'request_timeout' => (int)$settings['request_timeout'],
-                    'proxy' => (string)$settings['proxy'],
-                    'ca_bundle' => (string)$settings['ca_bundle'],
-                    'remind_expire' => (bool)$settings['remind_expire'],
-                    'remind_traffic' => (bool)$settings['remind_traffic'],
-                    'remind_expire_days' => (string)$settings['remind_expire_days'],
-                    'remind_traffic_percent' => (int)$settings['remind_traffic_percent'],
-                    'remind_expire_url' => (string)$settings['remind_expire_url'],
-                    'remind_traffic_url' => (string)$settings['remind_traffic_url'],
-                    'source' => (string)$settings['source'],
-                ],
+                'private_key_configured' => (string)$settings['private_key'] !== '',
+                'settings' => $this->publicSettings($settings),
             ],
         ]);
     }
@@ -106,8 +69,9 @@ class WebPushController extends Controller
     {
         try {
             $keys = $this->webPushService->generateVapidKeys();
-        } catch (\RuntimeException $error) {
-            abort(500, $error->getMessage());
+        } catch (\Throwable $error) {
+            Log::error('Web Push VAPID key generation failed', ['exception' => $error]);
+            abort(500, 'VAPID 密钥生成失败，请检查 OpenSSL 和服务器日志');
         }
 
         return response([
@@ -157,11 +121,11 @@ class WebPushController extends Controller
     {
         $id = (int)$request->input('id');
         if ($id <= 0) {
-            abort(500, '参数错误');
+            abort(422, '参数错误');
         }
         $subscription = WebPushSubscription::find($id);
         if (!$subscription) {
-            abort(500, '订阅不存在');
+            abort(404, '订阅不存在');
         }
         $subscription->delete();
         return response(['data' => true]);
@@ -183,8 +147,8 @@ class WebPushController extends Controller
 
     public function clearMessages()
     {
-        if (!\Schema::hasTable('v2_web_push_message')) {
-            abort(500, '缺少数据表 v2_web_push_message');
+        if (!Schema::hasTable('v2_web_push_message')) {
+            abort(503, 'Web Push 数据表尚未安装，请先执行数据库迁移');
         }
 
         $deleted = WebPushMessage::query()->delete();
@@ -198,26 +162,26 @@ class WebPushController extends Controller
     public function send(Request $request)
     {
         if (!$this->webPushService->isConfigured()) {
-            abort(500, '浏览器推送尚未配置，请先在后台 Web Push 页面完成配置并保存');
+            abort(503, '浏览器推送尚未配置，请先在后台 Web Push 页面完成配置并保存');
         }
 
-        if (!\Schema::hasTable('v2_web_push_message')) {
-            abort(500, '缺少数据表 v2_web_push_message，请执行：php artisan migrate --force');
+        if (!Schema::hasTable('v2_web_push_message')) {
+            abort(503, 'Web Push 消息表尚未安装，请先执行数据库迁移');
         }
 
-        if (!\Schema::hasTable('v2_web_push_subscription')) {
-            abort(500, '缺少数据表 v2_web_push_subscription，请执行：php artisan migrate --force');
+        if (!Schema::hasTable('v2_web_push_subscription')) {
+            abort(503, 'Web Push 订阅表尚未安装，请先执行数据库迁移');
         }
 
         $title = trim((string)$request->input('title', ''));
         $body = trim((string)$request->input('body', ''));
         if ($title === '') {
-            abort(500, '推送标题不能为空');
+            abort(422, '推送标题不能为空');
         }
 
         $targetType = (string)$request->input('target_type', 'all');
         if (!in_array($targetType, ['all', 'user', 'filter', 'subscription'], true)) {
-            abort(500, '推送目标类型无效');
+            abort(422, '推送目标类型无效');
         }
 
         $targetUserId = $request->input('target_user_id');
@@ -239,7 +203,7 @@ class WebPushController extends Controller
         ];
 
         if ($targetType === 'user' && (int)$targetUserId <= 0) {
-            abort(500, '请填写目标用户 ID');
+            abort(422, '请填写目标用户 ID');
         }
 
         try {
@@ -258,7 +222,7 @@ class WebPushController extends Controller
                 'require_interaction' => $request->input('require_interaction', false),
             ]);
         } catch (\InvalidArgumentException $error) {
-            abort(500, $error->getMessage());
+            abort(422, $error->getMessage());
         }
 
         try {
@@ -277,10 +241,8 @@ class WebPushController extends Controller
                 'status' => 'queued',
             ]);
         } catch (\Throwable $error) {
-            \Log::error('Web Push message create failed', [
-                'message' => $error->getMessage(),
-            ]);
-            abort(500, '写入推送记录失败：' . $error->getMessage());
+            Log::error('Web Push message create failed', ['exception' => $error]);
+            abort(500, '写入推送记录失败，请检查服务器日志');
         }
 
         // Always prefer queue for HTTP requests.
@@ -299,24 +261,27 @@ class WebPushController extends Controller
                 ]);
             } catch (\Throwable $syncError) {
                 $message->status = 'failed';
-                $message->error_message = $syncError->getMessage();
+                $message->error_message = '同步推送任务执行失败';
                 $message->save();
-                abort(500, '同步推送失败：' . $syncError->getMessage());
+                Log::error('Synchronous Web Push failed', [
+                    'message_id' => $message->id,
+                    'exception' => $syncError,
+                ]);
+                abort(500, '同步推送失败，请检查服务器日志');
             }
         }
 
         try {
             SendCustomWebPushJob::dispatch($message->id);
         } catch (\Throwable $queueError) {
-            \Log::error('Web Push queue dispatch failed', [
+            Log::error('Web Push queue dispatch failed', [
                 'message_id' => $message->id,
-                'reason' => $queueError->getMessage(),
+                'exception' => $queueError,
             ]);
             $message->status = 'failed';
-            $message->error_message = '入队失败：' . $queueError->getMessage();
+            $message->error_message = '推送任务入队失败';
             $message->save();
-            abort(500, '推送入队失败：' . $queueError->getMessage() .
-                '。请检查 Redis（REDIS_CLIENT=phpredis）并运行 php artisan horizon');
+            abort(500, '推送入队失败，请检查 Redis、队列进程和服务器日志');
         }
 
         return response([
@@ -331,12 +296,12 @@ class WebPushController extends Controller
     public function test(Request $request)
     {
         if (!$this->webPushService->isConfigured()) {
-            abort(500, '浏览器推送尚未配置');
+            abort(503, '浏览器推送尚未配置');
         }
 
         $userId = (int)$request->input('user_id', 0);
         if ($userId <= 0) {
-            abort(500, '请填写测试用户 ID');
+            abort(422, '请填写测试用户 ID');
         }
 
         try {
@@ -351,14 +316,17 @@ class WebPushController extends Controller
                 'renotify' => true,
             ]);
         } catch (\InvalidArgumentException $error) {
-            abort(500, $error->getMessage());
+            abort(422, $error->getMessage());
         }
 
         try {
             $stats = $this->webPushService->sendToUserIds([$userId], $payload);
         } catch (\Throwable $error) {
-            abort(500, '测试推送失败：' . $error->getMessage() .
-                '（若提示 Class Minishlink 不存在，请执行 composer require minishlink/web-push:^7.0）');
+            Log::error('Web Push test delivery failed', [
+                'user_id' => $userId,
+                'exception' => $error,
+            ]);
+            abort(500, '测试推送失败，请检查服务器日志');
         }
 
         try {
@@ -383,11 +351,15 @@ class WebPushController extends Controller
             ]);
         } catch (\Throwable $error) {
             // Sending already happened; do not fail the whole request on history write.
+            Log::error('Web Push test history write failed', [
+                'user_id' => $userId,
+                'exception' => $error,
+            ]);
             return response([
                 'data' => [
                     'message' => null,
                     'stats' => $stats,
-                    'warning' => '推送已尝试，但写入记录失败：' . $error->getMessage(),
+                    'warning' => '推送已尝试，但发送记录写入失败，请检查服务器日志',
                 ],
             ]);
         }
@@ -398,5 +370,29 @@ class WebPushController extends Controller
                 'stats' => $stats,
             ],
         ]);
+    }
+
+    private function publicSettings(array $settings)
+    {
+        return [
+            'enabled' => (bool)$settings['enabled'],
+            'vapid_subject' => (string)$settings['vapid_subject'],
+            'public_key' => (string)$settings['public_key'],
+            'private_key' => '',
+            'private_key_configured' => (string)$settings['private_key'] !== '',
+            'ttl' => (int)$settings['ttl'],
+            'urgency' => (string)$settings['urgency'],
+            'batch_size' => (int)$settings['batch_size'],
+            'request_timeout' => (int)$settings['request_timeout'],
+            'proxy' => (string)$settings['proxy'],
+            'ca_bundle' => (string)$settings['ca_bundle'],
+            'remind_expire' => (bool)$settings['remind_expire'],
+            'remind_traffic' => (bool)$settings['remind_traffic'],
+            'remind_expire_days' => (string)$settings['remind_expire_days'],
+            'remind_traffic_percent' => (int)$settings['remind_traffic_percent'],
+            'remind_expire_url' => (string)$settings['remind_expire_url'],
+            'remind_traffic_url' => (string)$settings['remind_traffic_url'],
+            'source' => (string)$settings['source'],
+        ];
     }
 }

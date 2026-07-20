@@ -19,30 +19,52 @@ class NoticeController extends Controller
 
     public function save(NoticeSave $request)
     {
+        $noticeId = null;
+        if ($request->filled('id')) {
+            $params = $request->validate([
+                'id' => 'required|integer|min:1'
+            ]);
+            $noticeId = (int)$params['id'];
+        }
+
+        return $this->persistNotice($request, $noticeId);
+    }
+
+    public function update(NoticeSave $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|min:1'
+        ]);
+
+        return $this->persistNotice($request, (int)$params['id']);
+    }
+
+    private function persistNotice(NoticeSave $request, ?int $noticeId)
+    {
         $data = $request->only([
             'title',
             'content',
             'img_url',
             'tags'
         ]);
-        if (!$request->input('id')) {
-            $notice = Notice::create($data);
-            if (!$notice) {
-                abort(500, '保存失败');
-            }
-            $this->dispatchWebPushIfNeeded($notice);
-        } else {
-            try {
-                $notice = Notice::find($request->input('id'));
-                if (!$notice) {
-                    abort(500, '公告不存在');
-                }
-                $notice->update($data);
-                $this->dispatchWebPushIfNeeded($notice->fresh());
-            } catch (\Exception $e) {
-                abort(500, '保存失败');
-            }
+
+        $notice = $noticeId ? Notice::find($noticeId) : new Notice();
+        if (!$notice) {
+            abort(404, '公告不存在');
         }
+
+        try {
+            $saved = $notice->fill($data)->save();
+        } catch (\Throwable $e) {
+            report($e);
+            abort(500, '保存失败');
+        }
+        if (!$saved) {
+            abort(500, '保存失败');
+        }
+
+        $this->dispatchWebPushIfNeeded($notice->fresh());
+
         return response([
             'data' => true
         ]);

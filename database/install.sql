@@ -7,18 +7,6 @@ SET sql_mode = 'NO_AUTO_VALUE_ON_ZERO';
 
 SET NAMES utf8mb4;
 
-DROP TABLE IF EXISTS `failed_jobs`;
-CREATE TABLE `failed_jobs` (
-                               `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-                               `connection` text COLLATE utf8mb4_unicode_ci NOT NULL,
-                               `queue` text COLLATE utf8mb4_unicode_ci NOT NULL,
-                               `payload` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
-                               `exception` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
-                               `failed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                               PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-
 DROP TABLE IF EXISTS `v2_commission_log`;
 CREATE TABLE `v2_commission_log` (
                                      `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -49,7 +37,8 @@ CREATE TABLE `v2_coupon` (
                              `ended_at` int(11) NOT NULL,
                              `created_at` int(11) NOT NULL,
                              `updated_at` int(11) NOT NULL,
-                             PRIMARY KEY (`id`)
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `v2_coupon_code_unique` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
@@ -67,7 +56,8 @@ CREATE TABLE `v2_giftcard` (
                              `ended_at` int(11) NOT NULL,
                              `created_at` int(11) NOT NULL,
                              `updated_at` int(11) NOT NULL,
-                             PRIMARY KEY (`id`)
+                             PRIMARY KEY (`id`),
+                             UNIQUE KEY `v2_giftcard_code_unique` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
@@ -80,7 +70,8 @@ CREATE TABLE `v2_invite_code` (
                                   `pv` int(11) NOT NULL DEFAULT '0',
                                   `created_at` int(11) NOT NULL,
                                   `updated_at` int(11) NOT NULL,
-                                  PRIMARY KEY (`id`)
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `v2_invite_code_code_unique` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
@@ -530,7 +521,7 @@ CREATE TABLE `v2_stat_user` (
                                 `created_at` int(11) NOT NULL,
                                 `updated_at` int(11) NOT NULL,
                                 PRIMARY KEY (`id`),
-                                UNIQUE KEY `server_rate_user_id_record_at` (`server_rate`,`user_id`,`record_at`),
+                                UNIQUE KEY `server_rate_user_id_record_at` (`server_rate`,`user_id`,`record_type`,`record_at`),
                                 KEY `user_id` (`user_id`),
                                 KEY `record_at` (`record_at`),
                                 KEY `server_rate` (`server_rate`)
@@ -647,6 +638,25 @@ CREATE TABLE `v2_oauth_user` (
   KEY `idx_email` (`email`),
   KEY `idx_primary_provider` (`primary_provider`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+
+DROP TABLE IF EXISTS `v2_job_idempotency`;
+CREATE TABLE `v2_job_idempotency` (
+  `scope` varchar(64) NOT NULL,
+  `job_id` varchar(64) NOT NULL,
+  `created_at` int(10) unsigned NOT NULL,
+  PRIMARY KEY (`scope`, `job_id`),
+  KEY `v2_job_idempotency_created_at_index` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+DROP TABLE IF EXISTS `v2_sql_patch`;
+CREATE TABLE `v2_sql_patch` (
+  `checksum` char(64) NOT NULL,
+  `filename` varchar(255) NOT NULL,
+  `applied_at` int(10) unsigned NOT NULL,
+  PRIMARY KEY (`checksum`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- 2025-09-12 10:05:00

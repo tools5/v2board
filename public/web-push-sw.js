@@ -18,16 +18,18 @@ function resolveNotificationUrl(rawUrl) {
     }
 
     try {
-        if (/^https?:\/\//i.test(rawUrl)) {
-            return rawUrl;
-        }
+        let resolvedUrl;
         if (rawUrl.charAt(0) === '#') {
-            return origin + '/' + rawUrl;
+            resolvedUrl = new URL('/' + rawUrl, origin);
+        } else {
+            resolvedUrl = new URL(rawUrl, origin + '/');
         }
-        if (rawUrl.charAt(0) === '/') {
-            return origin + rawUrl;
+
+        if (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:') {
+            return fallbackUrl;
         }
-        return new URL(rawUrl, origin + '/').href;
+
+        return resolvedUrl.href;
     } catch (error) {
         return fallbackUrl;
     }

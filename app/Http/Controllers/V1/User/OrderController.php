@@ -80,36 +80,37 @@ class OrderController extends Controller
             abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
         }
         if ($request->input('plan_id') == 0) {
-            $amount = $request->input('deposit_amount');
+            $amount = (int) $request->input('deposit_amount');
             if ($amount <= 0) {
                 abort(500, __('Failed to create order, deposit amount must be greater than 0'));
             }
             if ($amount >= 9999999 ) {
                 abort(500, __('Deposit amount too large, please contact the administrator'));
             }
-            $user = User::find($request->user['id']);
-            DB::beginTransaction();
-            $order = new Order();
-            $orderService = new OrderService($order);
-            $order->user_id = $request->user['id'];
-            $order->plan_id = $request->input('plan_id');
-            $order->period = 'deposit';
-            $order->trade_no = Helper::generateOrderNo();
-            $order->total_amount = $amount;
-            
-            $orderService->setOrderType($user);
-            $orderService->setInvite($user);
+            return DB::transaction(function () use ($request, $userService, $amount) {
+                $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
+                if (!$user || $userService->isNotCompleteOrderByUserId($request->user['id'])) {
+                    abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
+                }
+                $order = new Order();
+                $orderService = new OrderService($order);
+                $order->user_id = $request->user['id'];
+                $order->plan_id = (int) $request->input('plan_id');
+                $order->period = 'deposit';
+                $order->trade_no = Helper::generateOrderNo();
+                $order->total_amount = $amount;
 
-            if (!$order->save()) {
-                DB::rollback();
-                abort(500, __('Failed to create order'));
-            }
-    
-            DB::commit();
-    
-            return response([
-                'data' => $order->trade_no
-            ]);
+                $orderService->setOrderType($user);
+                $orderService->setInvite($user);
+
+                if (!$order->save()) {
+                    abort(500, __('Failed to create order'));
+                }
+
+                return response([
+                    'data' => $order->trade_no
+                ]);
+            }, 3);
         }
         $planService = new PlanService($request->input('plan_id'));
 
@@ -149,72 +150,75 @@ class OrderController extends Controller
             abort(500, __('This subscription has expired, please change to another subscription'));
         }
 
-        DB::beginTransaction();
-        $order = new Order();
-        $orderService = new OrderService($order);
-        $order->user_id = $request->user['id'];
-        $order->plan_id = $plan->id;
-        $order->period = $request->input('period');
-        $order->trade_no = Helper::generateOrderNo();
-        $order->total_amount = $plan[$request->input('period')];
-
-        if ($request->input('coupon_code')) {
-            $couponService = new CouponService($request->input('coupon_code'));
-            if (!$couponService->use($order)) {
-                DB::rollBack();
-                abort(500, __('Coupon failed'));
+        return DB::transaction(function () use ($request, $userService, $plan) {
+            $user = User::where('id', $request->user['id'])->lockForUpdate()->first();
+            if (!$user || $userService->isNotCompleteOrderByUserId($request->user['id'])) {
+                abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
             }
-            $order->coupon_id = $couponService->getId();
-        }
+            $order = new Order();
+            $orderService = new OrderService($order);
+            $order->user_id = $request->user['id'];
+            $order->plan_id = $plan->id;
+            $order->period = $request->input('period');
+            $order->trade_no = Helper::generateOrderNo();
+            $order->total_amount = $plan[$request->input('period')];
 
-        $orderService->setVipDiscount($user);
-        $orderService->setOrderType($user);
-
-        if ($user->balance > 0 && $order->total_amount > 0) {
-            $remainingBalance = $user->balance - $order->total_amount;
-            $userService = new UserService();
-            if ($remainingBalance > 0) {
-                if (!$userService->addBalance($order->user_id, - $order->total_amount)) {
-                    DB::rollBack();
-                    abort(500, __('Insufficient balance'));
+            if ($request->input('coupon_code')) {
+                $couponService = new CouponService($request->input('coupon_code'));
+                if (!$couponService->use($order)) {
+                    abort(500, __('Coupon failed'));
                 }
-                $order->balance_amount = $order->total_amount;
-                $order->total_amount = 0;
-            } else {
-                if (!$userService->addBalance($order->user_id, - $user->balance)) {
-                    DB::rollBack();
-                    abort(500, __('Insufficient balance'));
-                }
-                $order->balance_amount = $user->balance;
-                $order->total_amount -= $user->balance;
+                $order->coupon_id = $couponService->getId();
             }
-        }
 
-        $orderService->setInvite($user);
+            $orderService->setVipDiscount($user);
+            $orderService->setOrderType($user);
 
-        if (!$order->save()) {
-            DB::rollback();
-            abort(500, __('Failed to create order'));
-        }
+            if ($user->balance > 0 && $order->total_amount > 0) {
+                $remainingBalance = $user->balance - $order->total_amount;
+                if ($remainingBalance > 0) {
+                    if (!$userService->addBalance($order->user_id, -$order->total_amount)) {
+                        abort(500, __('Insufficient balance'));
+                    }
+                    $order->balance_amount = $order->total_amount;
+                    $order->total_amount = 0;
+                } else {
+                    if (!$userService->addBalance($order->user_id, -$user->balance)) {
+                        abort(500, __('Insufficient balance'));
+                    }
+                    $order->balance_amount = $user->balance;
+                    $order->total_amount -= $user->balance;
+                }
+            }
 
-        DB::commit();
+            $orderService->setInvite($user);
 
-        return response([
-            'data' => $order->trade_no
-        ]);
+            if (!$order->save()) {
+                abort(500, __('Failed to create order'));
+            }
+
+            return response([
+                'data' => $order->trade_no
+            ]);
+        }, 3);
     }
 
     public function checkout(Request $request)
     {
-        $tradeNo = $request->input('trade_no');
+        $request->validate([
+            'trade_no' => 'required|string',
+            'method' => 'nullable|integer'
+        ]);
+
+        $tradeNo = (string) $request->input('trade_no');
         $method = $request->input('method');
         $order = Order::where('trade_no', $tradeNo)
             ->where('user_id', $request->user['id'])
-            ->where('status', 0)
             ->first();
-        if (!$order) {
+        if (!$order || (int) $order->status !== OrderService::STATUS_PENDING) {
             abort(500, __('Order does not exist or has been paid'));
         }
+
         // free process
         if ($order->total_amount <= 0) {
             $orderService = new OrderService($order);
@@ -224,23 +228,56 @@ class OrderController extends Controller
                 'data' => true
             ]);
         }
-        $payment = Payment::find($method);
-        if (!$payment || $payment->enable !== 1) abort(500, __('Payment method is not available'));
+
+        list($order, $payment) = DB::transaction(function () use ($request, $tradeNo, $method) {
+            $payment = Payment::where('id', (int) $method)->lockForUpdate()->first();
+            if (!$payment || !(int) $payment->enable) {
+                abort(500, __('Payment method is not available'));
+            }
+
+            $order = Order::where('trade_no', $tradeNo)
+                ->where('user_id', $request->user['id'])
+                ->lockForUpdate()
+                ->first();
+            if (!$order || (int) $order->status !== OrderService::STATUS_PENDING) {
+                abort(500, __('Order does not exist or has been paid'));
+            }
+            if ($order->payment_id !== null && (int) $order->payment_id !== (int) $payment->id) {
+                abort(500, __('A different payment method has already been selected for this order'));
+            }
+
+            if ($order->payment_id === null) {
+                $order->handling_amount = null;
+                if ($payment->handling_fee_fixed || $payment->handling_fee_percent) {
+                    $order->handling_amount = (int) round(
+                        ($order->total_amount * ($payment->handling_fee_percent / 100)) + $payment->handling_fee_fixed
+                    );
+                }
+                $order->payment_id = $payment->id;
+                if (!$order->save()) {
+                    abort(500, __('Request failed, please try again later'));
+                }
+            }
+
+            return [$order, $payment];
+        }, 3);
+
         $paymentService = new PaymentService($payment->payment, $payment->id);
-        $order->handling_amount = NULL;
-        if ($payment->handling_fee_fixed || $payment->handling_fee_percent) {
-            $order->handling_amount = round(($order->total_amount * ($payment->handling_fee_percent / 100)) + $payment->handling_fee_fixed);
-        }
-        $order->payment_id = $method;
-        if (!$order->save()) abort(500, __('Request failed, please try again later'));
         $result = $paymentService->pay([
             'trade_no' => $tradeNo,
             'total_amount' => isset($order->handling_amount) ? ($order->total_amount + $order->handling_amount) : $order->total_amount,
             'user_id' => $order->user_id,
             'stripe_token' => $request->input('token')
         ]);
+        if (!is_array($result) || !isset($result['type']) || !array_key_exists('data', $result)) {
+            abort(500, __('Payment gateway returned an invalid response'));
+        }
+        if (!in_array((int) $result['type'], [0, 1, 2], true)) {
+            abort(500, __('Payment gateway returned an invalid response'));
+        }
+
         return response([
-            'type' => $result['type'],
+            'type' => (int) $result['type'],
             'data' => $result['data']
         ]);
     }
@@ -289,8 +326,11 @@ class OrderController extends Controller
         if (!$order) {
             abort(500, __('Order does not exist'));
         }
-        if ($order->status !== 0) {
+        if ((int) $order->status !== OrderService::STATUS_PENDING) {
             abort(500, __('You can only cancel pending orders'));
+        }
+        if ($order->payment_id !== null) {
+            abort(500, __('Orders with an external payment in progress cannot be cancelled'));
         }
         $orderService = new OrderService($order);
         if (!$orderService->cancel()) {

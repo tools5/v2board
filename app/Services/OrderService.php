@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\OrderHandleJob;
+use App\Models\Coupon;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
@@ -10,6 +11,12 @@ use Illuminate\Support\Facades\DB;
 
 class OrderService
 {
+    const STATUS_PENDING = 0;
+    const STATUS_PROCESSING = 1;
+    const STATUS_CANCELLED = 2;
+    const STATUS_COMPLETED = 3;
+    const STATUS_SURPLUS = 4;
+
     CONST STR_TO_TIME = [
         'month_price' => 1,
         'quarter_price' => 3,
@@ -20,85 +27,100 @@ class OrderService
     ];
     public $order;
     public $user;
+    private $paymentRecorded = false;
 
     public function __construct(Order $order)
     {
         $this->order = $order;
     }
 
-    public function open()
+    public function open(): bool
     {
-        $order = $this->order;
-        $this->user = User::find($order->user_id);
-        if ($order->type == 9) {
-            DB::beginTransaction();
-            $this->user->balance += $order->total_amount + $this->getbounus($order->total_amount);
+        return DB::transaction(function () {
+            $order = Order::where('id', $this->order->id)->lockForUpdate()->first();
+            if (!$order) {
+                return false;
+            }
 
+            $this->order = $order;
+            if ((int) $order->status === self::STATUS_COMPLETED || (int) $order->status === self::STATUS_SURPLUS) {
+                return true;
+            }
+            if ((int) $order->status !== self::STATUS_PROCESSING) {
+                return false;
+            }
+
+            $this->user = User::where('id', $order->user_id)->lockForUpdate()->first();
+            if (!$this->user) {
+                throw new \RuntimeException('Order user does not exist');
+            }
+
+            if ((int) $order->type === 9) {
+                $this->user->balance += $order->total_amount + $this->getbounus($order->total_amount);
+                if (!$this->user->save()) {
+                    throw new \RuntimeException('Failed to add deposit balance');
+                }
+                $order->status = self::STATUS_COMPLETED;
+                if (!$order->save()) {
+                    throw new \RuntimeException('Failed to complete deposit order');
+                }
+                return true;
+            }
+
+            $plan = Plan::find($order->plan_id);
+            if (!$plan) {
+                throw new \RuntimeException('Order plan does not exist');
+            }
+
+            if ($order->refund_amount) {
+                $this->user->balance += $order->refund_amount;
+            }
+
+            if ($order->surplus_order_ids) {
+                Order::whereIn('id', $order->surplus_order_ids)
+                    ->where('status', self::STATUS_COMPLETED)
+                    ->lockForUpdate()
+                    ->get();
+                Order::whereIn('id', $order->surplus_order_ids)
+                    ->where('status', self::STATUS_COMPLETED)
+                    ->update(['status' => self::STATUS_SURPLUS]);
+            }
+
+            switch ((string) $order->period) {
+                case 'onetime_price':
+                    $this->buyByOneTime($order, $plan);
+                    break;
+                case 'reset_price':
+                    $this->buyByResetTraffic();
+                    break;
+                default:
+                    $this->buyByPeriod($order, $plan);
+            }
+
+            switch ((int) $order->type) {
+                case 1:
+                    $this->openEvent(config('v2board.new_order_event_id', 0));
+                    break;
+                case 2:
+                    $this->openEvent(config('v2board.renew_order_event_id', 0));
+                    break;
+                case 3:
+                    $this->openEvent(config('v2board.change_order_event_id', 0));
+                    break;
+            }
+
+            $this->setSpeedLimit($plan->speed_limit);
             if (!$this->user->save()) {
-                DB::rollBack();
-                abort(500, '充值失败');
+                throw new \RuntimeException('Failed to update order user');
             }
-            $order->status = 3;
+
+            $order->status = self::STATUS_COMPLETED;
             if (!$order->save()) {
-                DB::rollBack();
-                abort(500, '充值失败');
+                throw new \RuntimeException('Failed to complete order');
             }
-            DB::commit();
-            return;
-        }
 
-        $plan = Plan::find($order->plan_id);
-
-        if ($order->refund_amount) {
-            $this->user->balance = $this->user->balance + $order->refund_amount;
-        }
-        DB::beginTransaction();
-        if ($order->surplus_order_ids) {
-            try {
-                Order::whereIn('id', $order->surplus_order_ids)->update([
-                    'status' => 4
-                ]);
-            } catch (\Exception $e) {
-                DB::rollback();
-                abort(500, '开通失败');
-            }
-        }
-        switch ((string)$order->period) {
-            case 'onetime_price':
-                $this->buyByOneTime($order, $plan);
-                break;
-            case 'reset_price':
-                $this->buyByResetTraffic();
-                break;
-            default:
-                $this->buyByPeriod($order, $plan);
-        }
-
-        switch ((int)$order->type) {
-            case 1:
-                $this->openEvent(config('v2board.new_order_event_id', 0));
-                break;
-            case 2:
-                $this->openEvent(config('v2board.renew_order_event_id', 0));
-                break;
-            case 3:
-                $this->openEvent(config('v2board.change_order_event_id', 0));
-                break;
-        }
-
-        $this->setSpeedLimit($plan->speed_limit);
-
-        if (!$this->user->save()) {
-            DB::rollBack();
-            abort(500, '开通失败');
-        }
-        $order->status = 3;
-        if (!$order->save()) {
-            DB::rollBack();
-            abort(500, '开通失败');
-        }
-
-        DB::commit();
+            return true;
+        }, 3);
     }
 
 
@@ -130,7 +152,7 @@ class OrderService
     {
         $order = $this->order;
         if ($user->discount) {
-            $order->discount_amount = $order->discount_amount + ($order->total_amount * ($user->discount / 100));
+            $order->discount_amount = (int) round($order->discount_amount + ($order->total_amount * ($user->discount / 100)));
         }
         $order->total_amount = $order->total_amount - $order->discount_amount;
     }
@@ -254,40 +276,127 @@ class OrderService
         $order->surplus_order_ids = array_column($orders, 'id');
     }
 
-    public function paid(string $callbackNo)
+    public function paid(string $callbackNo, ?int $paymentId = null, ?int $paidAmount = null): bool
     {
-        $order = $this->order;
-        if ($order->status !== 0) return true;
-        $order->status = 1;
-        $order->paid_at = time();
-        $order->callback_no = $callbackNo;
-        if (!$order->save()) return false;
+        if ($callbackNo === '' || strlen($callbackNo) > 255) {
+            return false;
+        }
+
+        $shouldDispatch = false;
+        $this->paymentRecorded = false;
+        $updated = DB::transaction(function () use ($callbackNo, $paymentId, $paidAmount, &$shouldDispatch) {
+            $order = Order::where('id', $this->order->id)->lockForUpdate()->first();
+            if (!$order) {
+                return false;
+            }
+
+            $this->order = $order;
+            if ((int) $order->status === self::STATUS_CANCELLED || (int) $order->status === self::STATUS_SURPLUS) {
+                return false;
+            }
+
+            if ($paymentId !== null && (int) $order->payment_id !== $paymentId) {
+                return false;
+            }
+
+            if ($paidAmount !== null) {
+                $expectedAmount = (int) $order->total_amount + (int) $order->handling_amount;
+                if ($paidAmount !== $expectedAmount) {
+                    return false;
+                }
+            }
+
+            if (in_array((int) $order->status, [self::STATUS_PROCESSING, self::STATUS_COMPLETED], true)
+                && $order->callback_no
+                && !hash_equals((string) $order->callback_no, $callbackNo)) {
+                return false;
+            }
+
+            if ((int) $order->status === self::STATUS_COMPLETED) {
+                return true;
+            }
+
+            if ((int) $order->status === self::STATUS_PROCESSING) {
+                $shouldDispatch = true;
+                return true;
+            }
+            if ((int) $order->status !== self::STATUS_PENDING) {
+                return false;
+            }
+
+            $order->status = self::STATUS_PROCESSING;
+            $order->paid_at = time();
+            $order->callback_no = $callbackNo;
+            if (!$order->save()) {
+                return false;
+            }
+
+            $this->paymentRecorded = true;
+            $shouldDispatch = true;
+            return true;
+        }, 3);
+
+        if (!$updated || !$shouldDispatch) {
+            return $updated;
+        }
+
         try {
-            OrderHandleJob::dispatch($order->trade_no);
-        } catch (\Exception $e) {
+            OrderHandleJob::dispatch($this->order->trade_no);
+        } catch (\Throwable $e) {
             return false;
         }
         return true;
     }
 
+    public function wasPaymentRecorded(): bool
+    {
+        return $this->paymentRecorded;
+    }
+
     public function cancel():bool
     {
-        $order = $this->order;
-        DB::beginTransaction();
-        $order->status = 2;
-        if (!$order->save()) {
-            DB::rollBack();
-            return false;
-        }
-        if ($order->balance_amount) {
-            $userService = new UserService();
-            if (!$userService->addBalance($order->user_id, $order->balance_amount)) {
-                DB::rollBack();
+        return DB::transaction(function () {
+            $order = Order::where('id', $this->order->id)->lockForUpdate()->first();
+            if (!$order) {
                 return false;
             }
-        }
-        DB::commit();
-        return true;
+
+            $this->order = $order;
+            if ((int) $order->status === self::STATUS_CANCELLED) {
+                return true;
+            }
+            if ((int) $order->status !== self::STATUS_PENDING || $order->payment_id !== null) {
+                return false;
+            }
+
+            if ($order->balance_amount) {
+                $user = User::where('id', $order->user_id)->lockForUpdate()->first();
+                if (!$user) {
+                    return false;
+                }
+                $user->balance += $order->balance_amount;
+                if (!$user->save()) {
+                    throw new \RuntimeException('Failed to refund order balance');
+                }
+            }
+
+            if ($order->coupon_id) {
+                $coupon = Coupon::where('id', $order->coupon_id)->lockForUpdate()->first();
+                if ($coupon && $coupon->limit_use !== null) {
+                    $coupon->limit_use += 1;
+                    if (!$coupon->save()) {
+                        throw new \RuntimeException('Failed to restore coupon usage');
+                    }
+                }
+            }
+
+            $order->status = self::STATUS_CANCELLED;
+            if (!$order->save()) {
+                throw new \RuntimeException('Failed to cancel order');
+            }
+
+            return true;
+        }, 3);
     }
 
     private function setSpeedLimit($speedLimit)

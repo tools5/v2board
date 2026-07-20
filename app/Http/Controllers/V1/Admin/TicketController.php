@@ -8,43 +8,60 @@ use App\Models\TicketMessage;
 use App\Models\User;
 use App\Services\TicketService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 class TicketController extends Controller
 {
+    private const MAX_PAGE_SIZE = 100;
+    private const MAX_MESSAGES = 1000;
+
     public function fetch(Request $request)
     {
-        if ($request->input('id')) {
-            $ticket = Ticket::where('id', $request->input('id'))
-                ->first();
+        if ($request->input('id') !== null && $request->input('id') !== '') {
+            $payload = $request->validate([
+                'id' => 'required|integer|min:1'
+            ]);
+            $ticket = Ticket::where('id', $payload['id'])->first();
             if (!$ticket) {
-                abort(500, '工单不存在');
+                abort(404, '工单不存在');
             }
-            $ticket['message'] = TicketMessage::where('ticket_id', $ticket->id)->get();
-            for ($i = 0; $i < count($ticket['message']); $i++) {
-                if ($ticket['message'][$i]['user_id'] !== $ticket->user_id) {
-                    $ticket['message'][$i]['is_me'] = true;
-                } else {
-                    $ticket['message'][$i]['is_me'] = false;
-                }
-            }
+
+            $messages = TicketMessage::where('ticket_id', $ticket->id)
+                ->orderBy('id', 'DESC')
+                ->limit(self::MAX_MESSAGES)
+                ->get()
+                ->reverse()
+                ->values()
+                ->map(function ($message) use ($ticket) {
+                    $message->setAttribute('is_me', (int)$message->user_id !== (int)$ticket->user_id);
+                    return $message;
+                });
+            $ticket->setAttribute('message', $messages);
+
             return response([
                 'data' => $ticket
             ]);
         }
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
+
+        $payload = $request->validate([
+            'current' => 'nullable|integer|min:1',
+            'pageSize' => 'nullable|integer|min:1',
+            'status' => 'nullable|in:0,1',
+            'reply_status' => 'nullable|array|max:2',
+            'reply_status.*' => 'in:0,1',
+            'email' => 'nullable|email:strict|max:64'
+        ]);
+        $current = min((int)($payload['current'] ?? 1), 1000000);
+        $pageSize = min(max((int)($payload['pageSize'] ?? 10), 10), self::MAX_PAGE_SIZE);
         $model = Ticket::orderBy('updated_at', 'DESC');
-        if ($request->input('status') !== NULL) {
-            $model->where('status', $request->input('status'));
+        if (array_key_exists('status', $payload) && $payload['status'] !== null) {
+            $model->where('status', $payload['status']);
         }
-        if ($request->input('reply_status') !== NULL) {
-            $model->whereIn('reply_status', $request->input('reply_status'));
+        if (!empty($payload['reply_status'])) {
+            $model->whereIn('reply_status', array_map('intval', $payload['reply_status']));
         }
-        if ($request->input('email') !== NULL) {
-            $user = User::where('email', $request->input('email'))->first();
-            if ($user) $model->where('user_id', $user->id);
+        if (!empty($payload['email'])) {
+            $user = User::where('email', $payload['email'])->first();
+            $user ? $model->where('user_id', $user->id) : $model->whereRaw('1 = 0');
         }
         $total = $model->count();
         $res = $model->forPage($current, $pageSize)
@@ -57,16 +74,14 @@ class TicketController extends Controller
 
     public function reply(Request $request)
     {
-        if (empty($request->input('id'))) {
-            abort(500, '参数错误');
-        }
-        if (empty($request->input('message'))) {
-            abort(500, '消息不能为空');
-        }
+        $payload = $request->validate([
+            'id' => 'required|integer|min:1',
+            'message' => 'required|string|max:20000'
+        ]);
         $ticketService = new TicketService();
         $ticketService->replyByAdmin(
-            $request->input('id'),
-            $request->input('message'),
+            $payload['id'],
+            $payload['message'],
             $request->user['id']
         );
         return response([
@@ -76,18 +91,18 @@ class TicketController extends Controller
 
     public function close(Request $request)
     {
-        if (empty($request->input('id'))) {
-            abort(500, '参数错误');
-        }
-        $ticket = Ticket::where('id', $request->input('id'))
-            ->first();
+        $payload = $request->validate([
+            'id' => 'required|integer|min:1'
+        ]);
+        $ticket = Ticket::where('id', $payload['id'])->first();
         if (!$ticket) {
-            abort(500, '工单不存在');
+            abort(404, '工单不存在');
         }
-        $ticket->status = 1;
-        if (!$ticket->save()) {
-            abort(500, '关闭失败');
+        if ((int)$ticket->status !== 1) {
+            $ticket->status = 1;
+            $ticket->save();
         }
+
         return response([
             'data' => true
         ]);

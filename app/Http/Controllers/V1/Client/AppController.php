@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\Client;
 use App\Http\Controllers\Controller;
 use App\Services\ServerService;
 use App\Services\UserService;
+use App\Support\ConfiguredUrl;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
 use Symfony\Component\Yaml\Yaml;
@@ -70,14 +71,14 @@ class AppController extends Controller
                 return response([
                     'data' => [
                         'version' => config('v2board.windows_version'),
-                        'download_url' => config('v2board.windows_download_url')
+                        'download_url' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.windows_download_url'))
                     ]
                 ]);
             } else {
                 return response([
                     'data' => [
                         'version' => config('v2board.macos_version'),
-                        'download_url' => config('v2board.macos_download_url')
+                        'download_url' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.macos_download_url'))
                     ]
                 ]);
             }
@@ -86,11 +87,11 @@ class AppController extends Controller
         return response([
             'data' => [
                 'windows_version' => config('v2board.windows_version'),
-                'windows_download_url' => config('v2board.windows_download_url'),
+                'windows_download_url' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.windows_download_url')),
                 'macos_version' => config('v2board.macos_version'),
-                'macos_download_url' => config('v2board.macos_download_url'),
+                'macos_download_url' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.macos_download_url')),
                 'android_version' => config('v2board.android_version'),
-                'android_download_url' => config('v2board.android_download_url')
+                'android_download_url' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.android_download_url'))
             ]
         ]);
     }

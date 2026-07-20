@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 use App\Utils\Helper;
+use Illuminate\Http\JsonResponse;
 
 class ServerController extends Controller
 {
@@ -15,7 +16,12 @@ class ServerController extends Controller
     private $nodeId;
     private $serverService;
 
-    public function __construct(Request $request)
+    public function __construct(ServerService $serverService)
+    {
+        $this->serverService = $serverService;
+    }
+
+    private function authenticateNode(Request $request): ?JsonResponse
     {
         $token = $request->input('token');
 
@@ -25,46 +31,47 @@ class ServerController extends Controller
 
         // token 为空（业务失败，不抛异常）
         if (empty($token)) {
-            response()->json([
+            return response()->json([
                 'status' => 'fail',
                 'message' => 'token is null'
-            ], 200)->send();
-            exit;
+            ], 200);
         }
 
         if (!$this->nodeId) {
-            response()->json([
+            return response()->json([
                 'status' => 'fail',
                 'message' => 'node parameter is error'
-            ], 200)->send();
-            exit;
+            ], 200);
         }
 
         // token 错误
         if (!Helper::verifyNodeToken($token, $this->nodeId, 'v2node')) {
-            response()->json([
+            return response()->json([
                 'status' => 'fail',
                 'message' => 'token is error'
-            ], 200)->send();
-            exit;
+            ], 200);
         }
 
-        $this->serverService = new ServerService();
         $this->nodeInfo = $this->serverService->getServer($this->nodeId, "v2node");
 
         // 节点不存在
         if (!$this->nodeInfo) {
-            response()->json([
+            return response()->json([
                 'status' => 'fail',
                 'message' => 'server is not exist'
-            ], 200)->send();
-            exit;
+            ], 200);
         }
+
+        return null;
     }
 
     // 后端获取配置
     public function config(Request $request)
     {
+        if ($authFailure = $this->authenticateNode($request)) {
+            return $authFailure;
+        }
+
         $response = [
             'listen_ip' => $this->nodeInfo->listen_ip,
             'server_port' => $this->nodeInfo->server_port,

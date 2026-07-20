@@ -69,6 +69,7 @@ class ConfigSave extends FormRequest
         // server
         'server_api_url' => 'nullable|string|max:2048',
         'server_token' => 'nullable|min:16',
+        'server_token_allow_legacy' => 'in:0,1',
         'server_pull_interval' => 'integer',
         'server_push_interval' => 'integer',
         'device_limit_mode' => 'in:0,1',

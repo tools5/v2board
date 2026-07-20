@@ -54,7 +54,7 @@ class Helper
         }
 
         $allowLegacy = filter_var(
-            config('v2board.server_token_allow_legacy', false),
+            config('v2board.server_token_allow_legacy', true),
             FILTER_VALIDATE_BOOLEAN
         );
         $legacyToken = (string)config('v2board.server_token', '');

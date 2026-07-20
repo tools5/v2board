@@ -396,7 +396,6 @@ class ServerService
             }
             $nodeId = (int) $v['id'];
             $apiKey = Helper::getNodeToken($nodeId, 'v2node');
-            $servers[$k]['node_token'] = $apiKey;
             $apiHostArg = escapeshellarg((string) $apiHost);
             $apiKeyArg = escapeshellarg((string) $apiKey);
             $servers[$k]['install_command'] = sprintf(

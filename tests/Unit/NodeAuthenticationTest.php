@@ -39,7 +39,7 @@ class NodeAuthenticationTest extends TestCase
         $this->assertFalse(Helper::verifyNodeToken($token, 8, 'v2node'));
     }
 
-    public function testV2nodeManagementExposesDerivedTokenInInstallCommand(): void
+    public function testV2nodeManagementReturnsInstallCommandWithoutSeparateToken(): void
     {
         Schema::create('v2_server_v2node', function (Blueprint $table) {
             $table->increments('id');
@@ -66,7 +66,7 @@ class NodeAuthenticationTest extends TestCase
             $node = (new ServerService())->getAllV2node()[0];
             $expectedToken = Helper::getNodeToken(7, 'v2node');
 
-            $this->assertSame($expectedToken, $node['node_token']);
+            $this->assertArrayNotHasKey('node_token', $node);
             $this->assertStringContainsString('--node-id 7', $node['install_command']);
             $this->assertStringContainsString($expectedToken, $node['install_command']);
         } finally {

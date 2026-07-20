@@ -2,10 +2,12 @@
 <html>
 
 <head>
-    @php($assetVersion = $version . '.' . max(
-        @filemtime(public_path('assets/admin/umi.js')),
-        @filemtime(public_path('assets/admin/custom.css'))
-    ))
+    @php
+        $assetVersion = $version . '.' . max(
+            (int) @filemtime(public_path('assets/admin/umi.js')),
+            (int) @filemtime(public_path('assets/admin/custom.css'))
+        );
+    @endphp
     <link rel="stylesheet" href="/assets/admin/components.chunk.css?v={{$assetVersion}}">
     <link rel="stylesheet" href="/assets/admin/umi.css?v={{$assetVersion}}">
     <link rel="stylesheet" href="/assets/admin/custom.css?v={{$assetVersion}}">
@@ -14,8 +16,8 @@
     <title>{{$title}}</title>
     <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,400i,600,700"> -->
     <script>window.routerBase = "/";</script>
-    <script>
-        window.settings = @json([
+    @php
+        $settings = [
             'title' => $title,
             'theme' => [
                 'sidebar' => $theme_sidebar,
@@ -26,7 +28,10 @@
             'background_url' => $background_url,
             'logo' => $logo,
             'secure_path' => $secure_path,
-        ]);
+        ];
+    @endphp
+    <script>
+        window.settings = @json($settings);
     </script>
 </head>
 

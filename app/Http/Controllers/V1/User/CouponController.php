@@ -17,8 +17,11 @@ class CouponController extends Controller
         $couponService->setPlanId($request->input('plan_id'));
         $couponService->setUserId($request->user['id']);
         $couponService->check();
+        $coupon = $couponService->getCoupon();
+        // 不向普通用户暴露券的内部库存/使用限制等字段，只保留前端计算优惠所需信息。
+        $coupon->makeHidden(['id', 'limit_use', 'limit_use_with_user', 'show', 'created_at', 'updated_at']);
         return response([
-            'data' => $couponService->getCoupon()
+            'data' => $coupon
         ]);
     }
 }

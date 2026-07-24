@@ -13,10 +13,12 @@ class UserUpdate extends FormRequest
      */
     public function rules()
     {
+        // 员工（staff）是受限的客服/运营角色，不应能够凭空造钱或直接接管账号。
+        // 因此这里刻意不放行 balance / commission_balance（资金）与 password（改密即接管）。
+        // 如你的员工确需这些能力，可自行补回对应字段并知悉其风险。
         return [
             'id' => 'required|integer|min:1',
             'email' => 'required|string|email:strict|max:255',
-            'password' => 'nullable|string|min:8|max:72',
             'transfer_enable' => 'sometimes|integer|min:0',
             'device_limit' => 'nullable|integer|min:0',
             'expired_at' => 'nullable|integer|min:0',
@@ -25,9 +27,7 @@ class UserUpdate extends FormRequest
             'commission_rate' => 'nullable|integer|min:0|max:100',
             'discount' => 'nullable|integer|min:0|max:100',
             'u' => 'sometimes|integer|min:0',
-            'd' => 'sometimes|integer|min:0',
-            'balance' => 'sometimes|integer|min:0',
-            'commission_balance' => 'sometimes|integer|min:0'
+            'd' => 'sometimes|integer|min:0'
         ];
     }
 

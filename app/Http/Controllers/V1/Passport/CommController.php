@@ -20,7 +20,7 @@ class CommController extends Controller
 {
     public function sendEmailVerify(CommSendEmailVerify $request)
     {
-        $ip = $request->ip();
+        $ip = Helper::getRealClientIp($request);
         $email = (string)$request->input('email');
         $cacheKeyEmail = strtolower(trim($email));
         $ipRateKey = 'email_verify:ip:' . $ip;

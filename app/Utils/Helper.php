@@ -94,60 +94,102 @@ class Helper
     public static function getRealClientIp($request = null)
     {
         $request = $request ?: request();
-        $candidates = [];
 
-        // Proxy headers are examined directly because TrustProxies is not
-        // configured; ordered by trustworthiness for CDN/reverse-proxy setups.
-        $headerCandidates = [
-            'CF-Connecting-IP',
-            'True-Client-IP',
-            'X-Real-IP',
-            'X-Client-IP',
-            'X-Forwarded-For',
-        ];
+        // The direct peer (REMOTE_ADDR) is the machine that actually opened the
+        // TCP connection. Client-supplied forwarding headers are only
+        // trustworthy when that peer is a reverse proxy we control; otherwise a
+        // client could spoof any source IP by sending its own X-Forwarded-For.
+        $remoteAddr = self::normalizeIpCandidate(
+            $request->server('REMOTE_ADDR')
+                ?: (isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : null)
+        );
+        if ($remoteAddr === null) {
+            $remoteAddr = self::normalizeIpCandidate($request->ip());
+        }
 
-        foreach ($headerCandidates as $headerName) {
-            $headerValue = $request->headers->get($headerName);
-            if (!$headerValue) {
-                $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $headerName));
-                $headerValue = $request->server($serverKey)
-                    ?: (isset($_SERVER[$serverKey]) ? $_SERVER[$serverKey] : null);
-            }
-            if (!$headerValue) {
-                continue;
-            }
+        if ($remoteAddr === null || self::isTrustedProxy($remoteAddr)) {
+            // Single-value proxy headers (set by our own proxy) are preferred
+            // over X-Forwarded-For so a spoofed left-most XFF entry cannot win.
+            $headerCandidates = [
+                'CF-Connecting-IP',
+                'True-Client-IP',
+                'X-Real-IP',
+                'X-Client-IP',
+                'X-Forwarded-For',
+            ];
 
-            foreach (explode(',', (string)$headerValue) as $ipPart) {
-                $candidateIp = self::normalizeIpCandidate(trim($ipPart));
-                if ($candidateIp) {
-                    $candidates[] = $candidateIp;
+            foreach ($headerCandidates as $headerName) {
+                $headerValue = $request->headers->get($headerName);
+                if (!$headerValue) {
+                    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $headerName));
+                    $headerValue = $request->server($serverKey)
+                        ?: (isset($_SERVER[$serverKey]) ? $_SERVER[$serverKey] : null);
+                }
+                if (!$headerValue) {
+                    continue;
+                }
+
+                foreach (explode(',', (string)$headerValue) as $ipPart) {
+                    $candidateIp = self::normalizeIpCandidate(trim($ipPart));
+                    if ($candidateIp !== null && !self::isLoopbackIp($candidateIp)) {
+                        return $candidateIp;
+                    }
                 }
             }
         }
 
+        if ($remoteAddr !== null) {
+            return $remoteAddr;
+        }
+
         $fallbackIp = self::normalizeIpCandidate($request->ip());
-        if ($fallbackIp) {
-            $candidates[] = $fallbackIp;
+        return $fallbackIp ?: '0.0.0.0';
+    }
+
+    /**
+     * A peer counts as a trusted reverse proxy when it is explicitly listed in
+     * config('v2board.trusted_proxies') (comma string or array; '*' trusts all),
+     * or — by default — when it is a loopback/private/reserved address, which
+     * covers the usual nginx-on-localhost / private-LAN reverse-proxy topology.
+     * Only then are forwarding headers honoured.
+     */
+    private static function isTrustedProxy($ip)
+    {
+        if (!is_string($ip) || $ip === '') {
+            return false;
         }
 
-        $remoteAddr = $request->server('REMOTE_ADDR')
-            ?: (isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : null);
-        $remoteAddr = self::normalizeIpCandidate($remoteAddr);
-        if ($remoteAddr) {
-            $candidates[] = $remoteAddr;
+        $configured = config('v2board.trusted_proxies', []);
+        if (is_string($configured)) {
+            $configured = $configured === '' ? [] : explode(',', $configured);
         }
-
-        // Prefer non-loopback so 127.0.0.1 does not hide the real client IP.
-        foreach ($candidates as $candidateIp) {
-            if (!self::isLoopbackIp($candidateIp)) {
-                return $candidateIp;
+        if (is_array($configured)) {
+            foreach ($configured as $entry) {
+                $entry = trim((string)$entry);
+                if ($entry === '') {
+                    continue;
+                }
+                if ($entry === '*') {
+                    return true;
+                }
+                if (strcasecmp($entry, $ip) === 0) {
+                    return true;
+                }
             }
         }
-        foreach ($candidates as $candidateIp) {
-            return $candidateIp;
+
+        if (self::isLoopbackIp($ip)) {
+            return true;
         }
 
-        return '0.0.0.0';
+        // filter_var returns false for private/reserved ranges when those flags
+        // are set, i.e. a public/routable address returns itself and is NOT a
+        // trusted proxy by default.
+        return filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        ) === false;
     }
 
     private static function normalizeIpCandidate($ip)

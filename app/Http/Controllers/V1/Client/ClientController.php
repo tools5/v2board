@@ -28,11 +28,10 @@ class ClientController extends Controller
             if ($flag !== '') {
                 if (strpos($flag, 'sing') === false) {
                     $this->setSubscribeInfoToServers($servers, $user);
-                    foreach (array_reverse(glob(app_path('Protocols') . '/*.php')) as $file) {
-                        $file = 'App\\Protocols\\' . basename($file, '.php');
-                        $class = new $file($user, $servers);
-                        if (strpos($flag, $class->flag) !== false) {
-                            return $class->handle();
+                    foreach (self::protocolFlagMap() as $class => $protocolFlag) {
+                        if ($protocolFlag !== '' && strpos($flag, $protocolFlag) !== false) {
+                            $instance = new $class($user, $servers);
+                            return $instance->handle();
                         }
                     }
                 }
@@ -52,6 +51,29 @@ class ClientController extends Controller
             $class = new General($user, $servers);
             return $class->handle();
         }
+    }
+
+    /**
+     * 有序的「协议类 => flag」映射，按 array_reverse(glob) 顺序（与原逻辑一致）。
+     * flag 是各协议类的字面量默认属性，用 get_class_vars 读取即可，无需实例化；
+     * 结果在进程内静态缓存，避免每次订阅请求都做一次目录 glob 与全量实例化。
+     */
+    private static function protocolFlagMap(): array
+    {
+        static $map = null;
+        if ($map !== null) {
+            return $map;
+        }
+        $map = [];
+        foreach (array_reverse(glob(app_path('Protocols') . '/*.php')) as $file) {
+            $class = 'App\\Protocols\\' . basename($file, '.php');
+            if (!class_exists($class)) {
+                continue;
+            }
+            $vars = get_class_vars($class);
+            $map[$class] = isset($vars['flag']) ? (string)$vars['flag'] : '';
+        }
+        return $map;
     }
 
     private function setSubscribeInfoToServers(&$servers, $user)

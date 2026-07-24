@@ -35,7 +35,7 @@ class AuthController extends Controller
         }
 
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
-            $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
+            $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', Helper::getRealClientIp($request))) ?? 0;
             if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
                 abort(500, __('Register frequently, please try again after :minute minute', [
                     'minute' => config('v2board.register_limit_expire', 60)
@@ -76,7 +76,7 @@ class AuthController extends Controller
         if ((int)config('v2board.email_verify', 0)) {
             $verifyAttemptKey = 'email_verify:register:' . hash(
                 'sha256',
-                $cacheKeyEmail . '|' . (string)$request->ip()
+                $cacheKeyEmail . '|' . (string)Helper::getRealClientIp($request)
             );
             if (RateLimiter::tooManyAttempts($verifyAttemptKey, 5)) {
                 abort(429, __('Too many requests, please try again later.'));
@@ -112,7 +112,7 @@ class AuthController extends Controller
 
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             Cache::put(
-                CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip()),
+                CacheKey::get('REGISTER_IP_RATE_LIMIT', Helper::getRealClientIp($request)),
                 (int)$registerCountByIP + 1,
                 (int)config('v2board.register_limit_expire', 60) * 60
             );
@@ -137,7 +137,7 @@ class AuthController extends Controller
             abort(500, __('Registration has closed'));
         }
 
-        $ip = $request->ip();
+        $ip = Helper::getRealClientIp($request);
         if (RateLimiter::tooManyAttempts('register_link:' . $ip, 3)) {
             abort(429, __('Too many requests, please try again later.'));
         }
@@ -231,7 +231,7 @@ class AuthController extends Controller
         }
 
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
-            $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
+            $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', Helper::getRealClientIp($request))) ?? 0;
             if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
                 abort(500, __('Register frequently, please try again after :minute minute', [
                     'minute' => config('v2board.register_limit_expire', 60)
@@ -266,7 +266,7 @@ class AuthController extends Controller
 
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             Cache::put(
-                CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip()),
+                CacheKey::get('REGISTER_IP_RATE_LIMIT', Helper::getRealClientIp($request)),
                 (int)$registerCountByIP + 1,
                 (int)config('v2board.register_limit_expire', 60) * 60
             );
@@ -560,7 +560,7 @@ class AuthController extends Controller
             abort(500, '当前未开启该找回密码方式');
         }
 
-        $ip = $request->ip();
+        $ip = Helper::getRealClientIp($request);
         if (RateLimiter::tooManyAttempts('password_reset_link:' . $ip, 3)) {
             abort(429, __('Too many requests, please try again later.'));
         }

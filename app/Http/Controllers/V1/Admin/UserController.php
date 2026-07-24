@@ -49,29 +49,79 @@ class UserController extends Controller
         }
 
         $filters = $request->input('filter');
-        if ($filters) {
-            foreach ($filters as $k => $filter) {
-                if ($filter['condition'] === '模糊') {
-                    $filter['condition'] = 'like';
-                    $filter['value'] = "%{$filter['value']}%";
-                }
-                if ($filter['key'] === 'd' || $filter['key'] === 'transfer_enable') {
-                    $filter['value'] = $filter['value'] * 1073741824;
-                }
-                if ($filter['key'] === 'invite_by_email') {
-                    $user = User::where('email', $filter['condition'], $filter['value'])->first();
-                    $inviteUserId = isset($user->id) ? $user->id : 0;
-                    $builder->where('invite_user_id', $inviteUserId);
-                    unset($filters[$k]);
-                    continue;
-                }
-                if ($filter['key'] === 'plan_id' && $filter['value'] == 'null') {
-                    $builder->whereNull('plan_id');
-                    continue;
-                }
-                $builder->where($filter['key'], $filter['condition'], $filter['value']);
-            }
+        if (!$filters) {
+            return;
         }
+        if (!is_array($filters)) {
+            abort(422, '过滤参数有误');
+        }
+
+        // 列名与操作符必须来自白名单，避免用未受控字符串直接进入 where()/orderBy()。
+        $allowedColumns = self::allowedUserColumns();
+        $allowedConditions = ['>', '<', '=', '>=', '<=', '<>', '!=', 'like', '模糊'];
+
+        foreach ($filters as $filter) {
+            if (!is_array($filter) || !isset($filter['key']) || !array_key_exists('value', $filter)) {
+                continue;
+            }
+            $key = (string)$filter['key'];
+            $condition = isset($filter['condition']) ? (string)$filter['condition'] : '=';
+            $value = $filter['value'];
+
+            // invite_by_email 为虚拟字段（按邀请人邮箱反查），其余必须是真实且非敏感的列。
+            if ($key !== 'invite_by_email' && !in_array($key, $allowedColumns, true)) {
+                abort(422, '过滤字段有误');
+            }
+            if (!in_array($condition, $allowedConditions, true)) {
+                abort(422, '过滤条件有误');
+            }
+
+            if ($condition === '模糊') {
+                $condition = 'like';
+                // 转义 LIKE 通配符，避免用户输入的 % / _ 改变匹配语义。
+                $value = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], (string)$value) . '%';
+            }
+
+            if ($key === 'd' || $key === 'transfer_enable') {
+                $value = $value * 1073741824;
+            }
+
+            if ($key === 'invite_by_email') {
+                $user = User::where('email', $condition, $value)->first();
+                $inviteUserId = isset($user->id) ? $user->id : 0;
+                $builder->where('invite_user_id', $inviteUserId);
+                continue;
+            }
+
+            if ($key === 'plan_id' && $value == 'null') {
+                $builder->whereNull('plan_id');
+                continue;
+            }
+
+            $builder->where($key, $condition, $value);
+        }
+    }
+
+    /**
+     * v2_user 的真实列（排除口令等敏感列），用于校验过滤/排序字段。
+     * 进程内静态缓存，避免每次请求都查 information_schema。
+     */
+    private static function allowedUserColumns(): array
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+        $sensitive = ['password', 'password_salt', 'password_algo', 'remember_token'];
+        try {
+            $columns = Schema::getColumnListing('v2_user');
+        } catch (\Throwable $e) {
+            $columns = [];
+        }
+        $cache = array_values(array_filter($columns, function ($column) use ($sensitive) {
+            return is_string($column) && !in_array($column, $sensitive, true);
+        }));
+        return $cache;
     }
 
     public function fetch(UserFetch $request)
@@ -80,6 +130,11 @@ class UserController extends Controller
         $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
+        // 排序列必须是真实且非敏感的列（或已知的计算别名 total_used），否则回退到 created_at。
+        $sortableColumns = array_merge(self::allowedUserColumns(), ['total_used']);
+        if (!in_array($sort, $sortableColumns, true)) {
+            $sort = 'created_at';
+        }
         $userModel = User::select(
             DB::raw('*'),
             DB::raw('(u+d) as total_used')
@@ -89,17 +144,22 @@ class UserController extends Controller
         $total = $userModel->count();
         $res = $userModel->forPage($current, $pageSize)
             ->get();
-        $plan = Plan::get();
+        // 套餐用 id 建索引，避免 用户数 × 套餐数 的嵌套匹配。
+        $plans = Plan::get()->keyBy('id');
+        // 一次性批量取本页用户的在线 IP 缓存，取代循环内逐个 Cache::get。
+        $aliveKeys = [];
+        foreach ($res as $row) {
+            $aliveKeys[$row['id']] = 'ALIVE_IP_USER_' . $row['id'];
+        }
+        $aliveData = $aliveKeys ? Cache::many(array_values($aliveKeys)) : [];
         for ($i = 0; $i < count($res); $i++) {
-            for ($k = 0; $k < count($plan); $k++) {
-                if ($plan[$k]['id'] == $res[$i]['plan_id']) {
-                    $res[$i]['plan_name'] = $plan[$k]['name'];
-                }
+            if (isset($plans[$res[$i]['plan_id']])) {
+                $res[$i]['plan_name'] = $plans[$res[$i]['plan_id']]['name'];
             }
             //统计在线设备
             $countalive = 0;
             $ips = [];
-            $ips_array = Cache::get('ALIVE_IP_USER_'. $res[$i]['id']);
+            $ips_array = $aliveData[$aliveKeys[$res[$i]['id']]] ?? null;
             if ($ips_array) {
                 $countalive = $ips_array['alive_ip'];
                 foreach($ips_array as $nodetypeid => $data) {

@@ -91,6 +91,94 @@ class Helper
         return bin2hex(random_bytes(16));
     }
 
+    public static function getRealClientIp($request = null)
+    {
+        $request = $request ?: request();
+        $candidates = [];
+
+        // Proxy headers are examined directly because TrustProxies is not
+        // configured; ordered by trustworthiness for CDN/reverse-proxy setups.
+        $headerCandidates = [
+            'CF-Connecting-IP',
+            'True-Client-IP',
+            'X-Real-IP',
+            'X-Client-IP',
+            'X-Forwarded-For',
+        ];
+
+        foreach ($headerCandidates as $headerName) {
+            $headerValue = $request->headers->get($headerName);
+            if (!$headerValue) {
+                $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $headerName));
+                $headerValue = $request->server($serverKey)
+                    ?: (isset($_SERVER[$serverKey]) ? $_SERVER[$serverKey] : null);
+            }
+            if (!$headerValue) {
+                continue;
+            }
+
+            foreach (explode(',', (string)$headerValue) as $ipPart) {
+                $candidateIp = self::normalizeIpCandidate(trim($ipPart));
+                if ($candidateIp) {
+                    $candidates[] = $candidateIp;
+                }
+            }
+        }
+
+        $fallbackIp = self::normalizeIpCandidate($request->ip());
+        if ($fallbackIp) {
+            $candidates[] = $fallbackIp;
+        }
+
+        $remoteAddr = $request->server('REMOTE_ADDR')
+            ?: (isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : null);
+        $remoteAddr = self::normalizeIpCandidate($remoteAddr);
+        if ($remoteAddr) {
+            $candidates[] = $remoteAddr;
+        }
+
+        // Prefer non-loopback so 127.0.0.1 does not hide the real client IP.
+        foreach ($candidates as $candidateIp) {
+            if (!self::isLoopbackIp($candidateIp)) {
+                return $candidateIp;
+            }
+        }
+        foreach ($candidates as $candidateIp) {
+            return $candidateIp;
+        }
+
+        return '0.0.0.0';
+    }
+
+    private static function normalizeIpCandidate($ip)
+    {
+        if ($ip === null || $ip === false || $ip === '') {
+            return null;
+        }
+        $candidateIp = trim((string)$ip);
+        if ($candidateIp === '') {
+            return null;
+        }
+        if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/', $candidateIp, $matches)) {
+            $candidateIp = $matches[1];
+        }
+        if (preg_match('/^\[([^\]]+)\]:\d+$/', $candidateIp, $matches)) {
+            $candidateIp = $matches[1];
+        }
+        if (filter_var($candidateIp, FILTER_VALIDATE_IP) === false) {
+            return null;
+        }
+        return $candidateIp;
+    }
+
+    private static function isLoopbackIp($ip)
+    {
+        if ($ip === '::1' || $ip === '0.0.0.0' || $ip === '::ffff:127.0.0.1') {
+            return true;
+        }
+        return strpos($ip, '127.') === 0;
+    }
+
     public static function generateOrderNo(): string
     {
         return (new \DateTimeImmutable('now'))->format('YmdHisv') . random_int(10000, 99999);

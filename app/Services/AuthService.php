@@ -37,7 +37,7 @@ class AuthService
         ], config('app.key'), 'HS256');
 
         self::addSession($this->user->id, $guid, [
-            'ip' => $request->ip(),
+            'ip' => Helper::getRealClientIp($request),
             'login_at' => $now,
             'ua' => $request->userAgent(),
             'expires_at' => $expiresAt,
@@ -68,6 +68,28 @@ class AuthService
         }
 
         return $authorization !== '' ? $authorization : null;
+    }
+
+    /**
+     * Resolve the session guid of the request's own token so endpoints can
+     * tell the caller which entry in the session list is theirs.
+     */
+    public static function currentSessionId(Request $request)
+    {
+        $jwt = self::extractAuthData($request);
+        if (!$jwt) {
+            return null;
+        }
+
+        try {
+            $data = (array)JWT::decode($jwt, new Key(config('app.key'), 'HS256'));
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        return isset($data['session']) && is_string($data['session']) && $data['session'] !== ''
+            ? $data['session']
+            : null;
     }
 
     public static function decryptAuthData($jwt)

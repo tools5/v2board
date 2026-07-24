@@ -35,7 +35,11 @@ class UserController extends Controller
         }
         $authService = new AuthService($user);
         return response([
-            'data' => $authService->getSessions()
+            'data' => [
+                'sessions' => $authService->getSessions(),
+                'current_ip' => Helper::getRealClientIp($request),
+                'current_session_id' => AuthService::currentSessionId($request),
+            ]
         ]);
     }
 

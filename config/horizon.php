@@ -3,8 +3,17 @@
 use Illuminate\Support\Str;
 use Linfo\Linfo;
 
-$lInfo = new Linfo();
-$parser = $lInfo->getParser();
+// Linfo requires the COM extension on Windows; fall back to a fixed worker
+// budget when it is unavailable so config loading never fatals.
+try {
+    $lInfo = new Linfo();
+    $totalRamBytes = (float)($lInfo->getParser()->getRam()['total'] ?? 0);
+} catch (\Throwable $linfoError) {
+    $totalRamBytes = 0.0;
+}
+$horizonRamBasedMaxProcesses = $totalRamBytes > 0
+    ? (int)ceil($totalRamBytes / 1024 / 1024 / 1024 * 6)
+    : 16;
 
 return [
 
@@ -184,7 +193,7 @@ return [
                 'balance' => 'auto',
                 'minProcesses' => 1,
                 'maxProcesses' => min(
-                    (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
+                    $horizonRamBasedMaxProcesses,
                     (int)env('HORIZON_MAX_PROCESSES', 128)
                 ),
                 'tries' => 1,
@@ -206,7 +215,7 @@ return [
                 'balance' => 'auto',
                 'minProcesses' => 1,
                 'maxProcesses' => min(
-                    (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
+                    $horizonRamBasedMaxProcesses,
                     (int)env('HORIZON_MAX_PROCESSES', 128)
                 ),
                 'tries' => 1,

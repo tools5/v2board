@@ -1,318 +1,1591 @@
-.v2b-login-settings {
-    max-width: 1120px;
-    margin: 0 auto;
+/* =============================================================================
+   v2board admin theme skin — port of QuantumNous/new-api visual system
+   Pure CSS tokens + custom.js runtime. No React rewrite / no PHP business change.
+   html switches: .dark | data-theme-preset | data-theme-radius | data-theme-scale
+                  | data-theme-font | data-theme-content-layout
+   Layout structure stays original (sidebar/header/content). Skin only.
+   ============================================================================= */
+
+/* 1) Tokens — default light */
+:root {
+  --radius: 0.75rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.692 0.141 243.716);
+  --primary-foreground: oklch(1 0 0);
+  /*
+   * 「实底主色」：只用在白字压色块的地方（primary 按钮、分页当前页、徽标）。
+   * 浅色模式下 --primary 本身偏亮，白字实测只有 r=2.72，所以这里压暗到 0.56；
+   * 链接、边框、强调色仍然用 --primary 原值，配色观感不变。
+   * 暗色模式下 --primary 已经够暗（白字 r≈3.9），直接等于 --primary。
+   */
+  --primary-solid: oklch(0.56 0.16 243.716);
+  --secondary: oklch(0.95 0 0);
+  --secondary-foreground: oklch(0.42 0.16 250);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.49 0 0);
+  --accent: color-mix(in oklch, var(--primary) 12%, var(--background));
+  --accent-foreground: oklch(0.145 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.596 0.145 163.225);
+  --warning: oklch(0.681 0.162 75.834);
+  --info: oklch(0.588 0.158 241.966);
+  --border: oklch(0.93 0 0);
+  --input: oklch(0.93 0 0);
+  --ring: oklch(0.708 0.16 249.003);
+  --sidebar: color-mix(in oklch, var(--foreground) 0.5%, var(--background));
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.64 0.197 253.892);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: color-mix(in oklch, var(--primary) 12%, var(--background));
+  --sidebar-accent-foreground: oklch(0.579 0.196 255.909);
+  --sidebar-border: oklch(0.93 0 0);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.06);
+  --shadow: 0 4px 12px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.04);
+  --font-sans: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino,
+    "Songti SC", "Noto Serif SC", "Source Han Serif SC", "SimSun", Georgia, serif;
+  --font-body: var(--font-sans);
+  --nb-font: var(--font-body);
 }
 
+/* 2) Dark default */
+.dark {
+  --background: oklch(0.235 0 0);
+  --foreground: oklch(0.965 0 0);
+  --card: oklch(0.285 0 0);
+  --card-foreground: oklch(0.965 0 0);
+  --popover: oklch(0.305 0 0);
+  --popover-foreground: oklch(0.965 0 0);
+  --primary: oklch(0.54 0.142 248.516);
+  --primary-foreground: oklch(1 0 0);
+  /* 暗色下主色已经够暗，实底不用再压 */
+  --primary-solid: var(--primary);
+  --secondary: oklch(0.335 0 0);
+  --secondary-foreground: oklch(0.9 0.05 250);
+  --muted: oklch(0.305 0 0);
+  --muted-foreground: oklch(0.78 0 0);
+  --accent: color-mix(in oklch, var(--primary) 20%, var(--background));
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.696 0.17 162.48);
+  --warning: oklch(0.769 0.188 70.08);
+  --info: oklch(0.613 0.14 239.919);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 17%);
+  --ring: oklch(0.554 0.148 250.726);
+  --sidebar: oklch(0.225 0 0);
+  --sidebar-foreground: oklch(0.95 0 0);
+  --sidebar-primary: oklch(0.588 0.123 246.488);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: color-mix(in oklch, var(--primary) 20%, var(--background));
+  --sidebar-accent-foreground: oklch(0.9 0.05 250);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3), 0 1px 3px oklch(0 0 0 / 0.35);
+  --shadow: 0 8px 24px oklch(0 0 0 / 0.45), 0 2px 6px oklch(0 0 0 / 0.35);
+}
+
+/* 3) Presets */
+[data-theme-preset='anthropic'] {
+  --background: oklch(0.984 0.004 95);
+  --foreground: oklch(0.205 0.005 60);
+  --card: oklch(0.945 0.008 92);
+  --card-foreground: oklch(0.205 0.005 60);
+  --popover: oklch(0.97 0.006 92);
+  --popover-foreground: oklch(0.205 0.005 60);
+  --primary: oklch(0.685 0.142 38);
+  --primary-foreground: oklch(0.99 0.005 95);
+  --secondary: oklch(0.925 0.008 92);
+  --secondary-foreground: oklch(0.255 0.005 60);
+  --muted: oklch(0.94 0.007 92);
+  --muted-foreground: oklch(0.45 0.01 60);
+  --accent: oklch(0.93 0.02 55);
+  --accent-foreground: oklch(0.205 0.005 60);
+  --border: oklch(0.9 0.01 90);
+  --input: oklch(0.9 0.01 90);
+  --ring: oklch(0.685 0.142 38);
+  --sidebar: oklch(0.97 0.006 95);
+  --sidebar-foreground: oklch(0.205 0.005 60);
+  --sidebar-primary: oklch(0.685 0.142 38);
+  --sidebar-primary-foreground: oklch(0.99 0.005 95);
+  --sidebar-accent: oklch(0.93 0.02 55);
+  --sidebar-accent-foreground: oklch(0.35 0.08 38);
+  --sidebar-border: oklch(0.9 0.01 90);
+  --radius: 0.75rem;
+}
+.dark[data-theme-preset='anthropic'] {
+  --background: oklch(0.205 0.005 60);
+  --foreground: oklch(0.96 0.005 95);
+  --card: oklch(0.25 0.006 60);
+  --card-foreground: oklch(0.96 0.005 95);
+  --popover: oklch(0.27 0.006 60);
+  --popover-foreground: oklch(0.96 0.005 95);
+  --primary: oklch(0.72 0.13 38);
+  --primary-foreground: oklch(0.18 0.01 60);
+  --secondary: oklch(0.3 0.008 60);
+  --secondary-foreground: oklch(0.94 0.005 95);
+  --muted: oklch(0.28 0.007 60);
+  --muted-foreground: oklch(0.75 0.01 90);
+  --accent: oklch(0.32 0.02 45);
+  --accent-foreground: oklch(0.96 0.005 95);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.72 0.13 38);
+  --sidebar: oklch(0.19 0.005 60);
+  --sidebar-foreground: oklch(0.95 0.005 95);
+  --sidebar-primary: oklch(0.72 0.13 38);
+  --sidebar-primary-foreground: oklch(0.18 0.01 60);
+  --sidebar-accent: oklch(0.3 0.02 45);
+  --sidebar-accent-foreground: oklch(0.95 0.005 95);
+  --sidebar-border: oklch(1 0 0 / 12%);
+}
+
+[data-theme-preset='underground'] {
+  --primary: oklch(0.5315 0.0694 156.19);
+  --primary-foreground: oklch(1 0 0);
+  --ring: oklch(0.5315 0.0694 156.19);
+  --accent: color-mix(in oklch, var(--primary) 14%, var(--background));
+  --sidebar-primary: oklch(0.5315 0.0694 156.19);
+  --sidebar-accent: color-mix(in oklch, var(--primary) 14%, var(--background));
+  --sidebar-accent-foreground: var(--primary);
+  --radius: 0.5rem;
+}
+.dark[data-theme-preset='underground'] {
+  --primary: oklch(0.6147 0.0867 154.73);
+  --primary-foreground: oklch(0.129 0.0306 264.71);
+  --ring: oklch(0.6147 0.0867 154.73);
+  --accent: color-mix(in oklch, var(--primary) 20%, var(--background));
+  --sidebar-primary: oklch(0.6147 0.0867 154.73);
+  --sidebar-accent: color-mix(in oklch, var(--primary) 20%, var(--background));
+  --sidebar-accent-foreground: oklch(0.929 0.0095 255.53);
+}
+
+[data-theme-preset='simple-large'] {
+  --background: oklch(0.99 0 0);
+  --foreground: oklch(0.15 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0 0);
+  --primary: oklch(0.22 0 0);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.93 0 0);
+  --secondary-foreground: oklch(0.15 0 0);
+  --muted: oklch(0.95 0 0);
+  --muted-foreground: oklch(0.36 0 0);
+  --accent: oklch(0.91 0 0);
+  --accent-foreground: oklch(0.15 0 0);
+  --border: oklch(0.82 0 0);
+  --input: oklch(0.82 0 0);
+  --ring: oklch(0.22 0 0);
+  --sidebar: oklch(0.96 0 0);
+  --sidebar-foreground: oklch(0.15 0 0);
+  --sidebar-primary: oklch(0.22 0 0);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.9 0 0);
+  --sidebar-accent-foreground: oklch(0.15 0 0);
+  --sidebar-border: oklch(0.82 0 0);
+  --radius: 0.5rem;
+}
+.dark[data-theme-preset='simple-large'] {
+  --background: oklch(0.215 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.27 0 0);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.29 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.94 0 0);
+  --primary-foreground: oklch(0.145 0 0);
+  --secondary: oklch(0.315 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.315 0 0);
+  --muted-foreground: oklch(0.82 0 0);
+  --accent: oklch(0.36 0 0);
+  --accent-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 18%);
+  --input: oklch(1 0 0 / 24%);
+  --ring: oklch(0.94 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.94 0 0);
+  --sidebar-primary-foreground: oklch(0.145 0 0);
+  --sidebar-accent: oklch(0.34 0 0);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(1 0 0 / 18%);
+}
+
+[data-theme-preset='ocean-breeze'] { --primary: oklch(0.5461 0.2152 262.88); --ring: var(--primary); --sidebar-primary: var(--primary); --radius: 0.3rem; }
+.dark[data-theme-preset='ocean-breeze'] { --primary: oklch(0.68 0.16 262); --ring: var(--primary); --sidebar-primary: var(--primary); }
+[data-theme-preset='rose-garden'] { --primary: oklch(0.5827 0.2418 12.23); --ring: var(--primary); --sidebar-primary: var(--primary); --radius: 1rem; }
+.dark[data-theme-preset='rose-garden'] { --primary: oklch(0.6476 0.2348 10.36); --ring: var(--primary); --sidebar-primary: var(--primary); }
+[data-theme-preset='forest-whisper'] { --primary: oklch(0.5276 0.1072 182.22); --ring: var(--primary); --sidebar-primary: var(--primary); }
+.dark[data-theme-preset='forest-whisper'] { --primary: oklch(0.68 0.11 182); --ring: var(--primary); --sidebar-primary: var(--primary); }
+[data-theme-preset='lavender-dream'] { --primary: oklch(0.5709 0.1808 306.89); --ring: var(--primary); --sidebar-primary: var(--primary); }
+.dark[data-theme-preset='lavender-dream'] { --primary: oklch(0.7 0.14 306); --ring: var(--primary); --sidebar-primary: var(--primary); }
+[data-theme-preset='sunset-glow'] { --primary: oklch(0.5591 0.1882 25.33); --ring: var(--primary); --sidebar-primary: var(--primary); }
+.dark[data-theme-preset='sunset-glow'] { --primary: oklch(0.7 0.15 25); --ring: var(--primary); --sidebar-primary: var(--primary); }
+
+/* colored presets: derive accents from primary (exclude anthropic/simple-large/default) */
+[data-theme-preset='underground'],
+[data-theme-preset='ocean-breeze'],
+[data-theme-preset='rose-garden'],
+[data-theme-preset='forest-whisper'],
+[data-theme-preset='lavender-dream'],
+[data-theme-preset='sunset-glow'] {
+  --accent: color-mix(in oklch, var(--primary) 12%, var(--background));
+  --sidebar-accent: color-mix(in oklch, var(--primary) 12%, var(--background));
+  --sidebar-accent-foreground: var(--primary);
+}
+.dark[data-theme-preset='underground'],
+.dark[data-theme-preset='ocean-breeze'],
+.dark[data-theme-preset='rose-garden'],
+.dark[data-theme-preset='forest-whisper'],
+.dark[data-theme-preset='lavender-dream'],
+.dark[data-theme-preset='sunset-glow'] {
+  --accent: color-mix(in oklch, var(--primary) 20%, var(--background));
+  --sidebar-accent: color-mix(in oklch, var(--primary) 20%, var(--background));
+  --sidebar-accent-foreground: oklch(0.95 0 0);
+  --card: color-mix(in oklch, var(--primary) 8%, oklch(0.285 0 0));
+  --muted: color-mix(in oklch, var(--primary) 10%, oklch(0.305 0 0));
+  --sidebar: color-mix(in oklch, var(--primary) 8%, oklch(0.225 0 0));
+}
+
+/* 4) Axes */
+[data-theme-radius='none'] { --radius: 0; }
+[data-theme-radius='sm'] { --radius: 0.3rem; }
+[data-theme-radius='md'] { --radius: 0.5rem; }
+[data-theme-radius='lg'] { --radius: 0.75rem; }
+[data-theme-radius='xl'] { --radius: 1rem; }
+
+html[data-theme-scale='sm'] { font-size: 14px; }
+html[data-theme-scale='md'] { font-size: 16px; }
+html[data-theme-scale='lg'] { font-size: 17px; }
+html[data-theme-preset='simple-large'][data-theme-scale='md'] { font-size: 17px; }
+html[data-theme-preset='simple-large'][data-theme-scale='lg'] { font-size: 18px; }
+
+html[data-theme-font='sans'] { --font-body: var(--font-sans); --nb-font: var(--font-body); }
+html[data-theme-font='serif'] { --font-body: var(--font-serif); --nb-font: var(--font-body); }
+html[data-theme-font='serif'] #page-container h1,
+html[data-theme-font='serif'] #page-container h2,
+html[data-theme-font='serif'] #page-container h3,
+html[data-theme-font='serif'] #page-container .block-title,
+html[data-theme-font='serif'] #page-container .content-heading {
+  font-weight: 500;
+  letter-spacing: -0.012em;
+}
+
+html[data-theme-content-layout='full'] #main-container > .content,
+html[data-theme-content-layout='full'] #main-container .content {
+  max-width: none;
+}
+html[data-theme-content-layout='centered'] #main-container > .content,
+html[data-theme-content-layout='centered'] #main-container .content,
+html[data-theme-content-layout='centered'] #page-container .content-header,
+html[data-theme-content-layout='centered'] #page-header .content-header {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+/* 5) Global base + shell (Dashmix structure preserved) */
+html, body {
+  background: var(--background) !important;
+  color: var(--foreground);
+  font-family: var(--nb-font);
+}
+#page-container {
+  background: var(--background) !important;
+  color: var(--foreground);
+  font-family: var(--nb-font);
+}
+/*
+ * umi.css 里有 `#main-container{background-color:#f0f3f8!important}`，
+ * 带 !important，所以内容区必须同样用 !important 才盖得住，
+ * 否则暗色模式下整块内容区仍是浅灰底。
+ */
+#main-container {
+  background: var(--background) !important;
+  color: var(--foreground);
+}
+#page-container .content-heading,
+#page-container h1, #page-container h2, #page-container h3,
+#page-container h4, #page-container h5, #page-container h6 {
+  color: var(--foreground);
+}
+#page-container p,
+#page-container .text-muted,
+#page-container .fs-sm.text-muted {
+  color: var(--muted-foreground) !important;
+}
+
+/* Sidebar */
+#sidebar {
+  background: var(--sidebar) !important;
+  border-right: 1px solid var(--sidebar-border);
+  color: var(--sidebar-foreground);
+}
+#sidebar .content-side,
+#sidebar .content-header {
+  background: transparent !important;
+  color: var(--sidebar-foreground);
+}
+#sidebar .content-header { border-bottom: 1px solid var(--sidebar-border); }
+#sidebar .nav-main-heading {
+  color: var(--muted-foreground) !important;
+  opacity: 0.9;
+  letter-spacing: 0.02em;
+}
+#sidebar .nav-main-link {
+  color: var(--sidebar-foreground) !important;
+  border-radius: calc(var(--radius) * 0.8);
+  margin: 2px 10px;
+  transition: background-color .15s ease, color .15s ease;
+}
+#sidebar .nav-main-link .nav-main-link-icon {
+  color: var(--muted-foreground) !important;
+}
+#sidebar .nav-main-link:hover {
+  background: var(--sidebar-accent) !important;
+  color: var(--sidebar-accent-foreground) !important;
+}
+#sidebar .nav-main-link:hover .nav-main-link-icon {
+  color: var(--sidebar-accent-foreground) !important;
+}
+#sidebar .nav-main-item.open > .nav-main-link,
+#sidebar .nav-main-link.active {
+  background: var(--sidebar-accent) !important;
+  color: var(--sidebar-accent-foreground) !important;
+  font-weight: 600;
+}
+#sidebar .nav-main-item.open > .nav-main-link .nav-main-link-icon,
+#sidebar .nav-main-link.active .nav-main-link-icon {
+  color: var(--sidebar-primary) !important;
+}
+#sidebar .nav-main-submenu { background-color: transparent !important; }
+#sidebar .nav-main-submenu .nav-main-link { padding-left: 2.75rem; }
+
+/* Header */
+#page-header {
+  background: color-mix(in oklch, var(--background) 88%, transparent) !important;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+}
+#page-header,
+#page-header a,
+#page-header .nav-link,
+#page-header .fw-semibold,
+#page-header .font-w600 {
+  color: var(--foreground) !important;
+}
+#page-header .nav-link:hover,
+#page-header a:hover { color: var(--primary) !important; }
+#page-header i { color: var(--muted-foreground) !important; }
+
+/* Cards / blocks */
+#page-container .block {
+  background: var(--card) !important;
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+#page-container .block.block-themed > .block-header { background-color: transparent; }
+#page-container .block-header {
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--muted) 45%, transparent) !important;
+}
+#page-container .block-header-default {
+  background-color: color-mix(in oklch, var(--muted) 50%, transparent) !important;
+}
+#page-container .block-title { color: var(--foreground); font-weight: 600; }
+#page-container .block-content { color: var(--card-foreground); }
+
+/* =============================================================================
+   6) Ant Design 皮肤
+   -----------------------------------------------------------------------------
+   注意这里不能用 #root 作用域。抽屉（.ant-drawer）、弹窗、日期浮层这些是
+   portal 到 document.body 的，不在 #root 里；之前带 #root 前缀导致
+   「编辑节点」抽屉完全没被皮肤覆盖：白底面板配亮色标签，字直接看不见。
+   这些选择器都是 antd 专属类名，不加作用域也不会误伤别的元素；
+   custom.css 又在 components.chunk.css 之后加载，同权重时以这里为准。
+   ============================================================================= */
+.ant-card {
+  background: var(--card) !important;
+  color: var(--card-foreground) !important;
+  border-color: var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-sm);
+}
+.ant-card-head {
+  color: var(--foreground) !important;
+  border-bottom-color: var(--border) !important;
+}
+.ant-btn {
+  border-radius: calc(var(--radius) * 0.7) !important;
+  font-weight: 500;
+}
+.ant-btn-primary {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+}
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
+  filter: brightness(1.05);
+}
+/*
+ * 注意：这个后台是 antd v3（components.chunk.css 里 v4 类名 0 命中）。
+ * 之前这里写的是 v4 的 .ant-select-selector / .ant-picker，实际匹配不上，
+ * 所以下拉框和日期选择器一直是 antd 默认亮色。v3 对应名是
+ * .ant-select-selection / .ant-calendar-picker。
+ */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selection,
+.ant-calendar-picker-input,
+.ant-time-picker-input {
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  border-color: var(--input) !important;
+  border-radius: calc(var(--radius) * 0.7) !important;
+}
+.ant-select-selection__placeholder,
+.ant-select-search__field__placeholder {
+  color: var(--muted-foreground) !important;
+}
+.ant-select-arrow,
+.ant-select-selection__choice__remove {
+  color: var(--muted-foreground) !important;
+}
+/* 多选已选项的小块 */
+.ant-select-selection__choice {
+  background: color-mix(in oklch, var(--foreground) 10%, var(--background)) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+.ant-input:focus,
+.ant-input-affix-wrapper-focused,
+.ant-select-focused .ant-select-selection,
+.ant-select-selection:focus,
+.ant-select-open .ant-select-selection,
+.ant-calendar-picker-input:focus {
+  border-color: var(--ring) !important;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 25%, transparent) !important;
+}
+.ant-input[disabled],
+.ant-select-disabled .ant-select-selection {
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+}
+.ant-table {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+}
+.ant-table-thead > tr > th {
+  background: color-mix(in oklch, var(--foreground) 3%, var(--background)) !important;
+  color: var(--muted-foreground) !important;
+  border-bottom-color: var(--border) !important;
+}
+.ant-table-tbody > tr > td {
+  border-bottom-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+.ant-table-tbody > tr:hover > td {
+  background: color-mix(in oklch, var(--foreground) 4%, transparent) !important;
+}
+.ant-modal-content,
+.ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-popover-inner {
+  background: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+/* v3 的下拉项是 .ant-select-dropdown-menu-item，不是 v4 的 .ant-select-item */
+.ant-select-dropdown-menu-item {
+  color: var(--popover-foreground) !important;
+  border-radius: calc(var(--radius) * 0.6);
+}
+.ant-select-dropdown-menu-item-active,
+.ant-select-dropdown-menu-item-selected {
+  background: var(--accent) !important;
+  color: var(--accent-foreground) !important;
+}
+.ant-select-dropdown-menu-item-disabled {
+  color: var(--muted-foreground) !important;
+}
+
+/* 分页：v3 的 .ant-pagination-item / -item-link 是白底（实测命中节点管理页） */
+.ant-pagination-item,
+.ant-pagination-item-link,
+.ant-pagination-options-quick-jumper input {
+  background: var(--secondary) !important;
+  border-color: var(--border) !important;
+  color: var(--secondary-foreground) !important;
+  border-radius: calc(var(--radius) * 0.5) !important;
+}
+.ant-pagination-item a { color: inherit !important; }
+.ant-pagination-item:hover,
+.ant-pagination-item-link:hover {
+  border-color: var(--primary) !important;
+  color: var(--foreground) !important;
+}
+.ant-pagination-item-active {
+  background: var(--primary-solid) !important;
+  border-color: var(--primary-solid) !important;
+}
+.ant-pagination-item-active a { color: var(--primary-foreground) !important; }
+.ant-pagination-total-text,
+.ant-pagination-jump-prev,
+.ant-pagination-jump-next { color: var(--muted-foreground) !important; }
+
+/* 日期选择浮层（v3 是 .ant-calendar，挂在 body 下不在 #root 内） */
+.ant-calendar {
+  background: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border-color: var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow);
+}
+.ant-calendar-header,
+.ant-calendar-footer { border-color: var(--border) !important; }
+.ant-calendar-header a,
+.ant-calendar-my-select a,
+.ant-calendar-column-header { color: var(--foreground) !important; }
+.ant-calendar-date { color: var(--foreground) !important; border-radius: calc(var(--radius) * 0.5); }
+.ant-calendar-date:hover { background: var(--accent) !important; }
+.ant-calendar-selected-day .ant-calendar-date,
+.ant-calendar-today .ant-calendar-date {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-color: var(--primary) !important;
+}
+.ant-calendar-last-month-cell .ant-calendar-date,
+.ant-calendar-next-month-btn-day .ant-calendar-date { color: var(--muted-foreground) !important; }
+/* --- Sidebar container (new-api style): the missing piece --- */
+.ant-layout-sider,
+.ant-layout-sider-children {
+  background: var(--sidebar) !important;
+  border-right: 1px solid var(--sidebar-border) !important;
+}
+.ant-layout-sider .logo,
+.ant-layout-sider-children .logo {
+  background: transparent !important;
+}
+/* menu base */
+.ant-menu {
+  background: transparent !important;
+  color: var(--sidebar-foreground) !important;
+  border-right: 0 !important;
+  padding: 8px 10px !important;
+}
+/* group titles: 常规 / 个人 / 管理员 */
+.ant-menu-item-group-title {
+  padding: 16px 12px 6px !important;
+  color: var(--muted-foreground) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase;
+}
+/* items + submenu titles: rounded pill rows */
+.ant-menu-item,
+.ant-menu-submenu-title {
+  height: 42px !important;
+  line-height: 42px !important;
+  margin: 4px 0 !important;
+  padding-left: 12px !important;
+  border-radius: calc(var(--radius) * 0.8) !important;
+  color: var(--sidebar-foreground) !important;
+  transition: background .15s ease, color .15s ease !important;
+}
+.ant-menu-item .anticon,
+.ant-menu-submenu-title .anticon,
+.ant-menu-item i,
+.ant-menu-submenu-title i {
+  color: inherit !important;
+}
+/* hover */
+.ant-menu-item:hover,
+.ant-menu-submenu-title:hover {
+  background: color-mix(in oklch, var(--sidebar-foreground) 8%, transparent) !important;
+  color: var(--sidebar-foreground) !important;
+}
+/* selected: soft rounded highlight block like new-api */
+.ant-menu-item-selected,
+.ant-menu-item-selected:hover {
+  background: var(--sidebar-accent) !important;
+  color: var(--sidebar-accent-foreground) !important;
+  font-weight: 600 !important;
+}
+.ant-menu-item-selected::after {
+  display: none !important;
+}
+/* remove antd default right border indicator */
+.ant-menu-inline .ant-menu-item::after {
+  border-right: 0 !important;
+}
+/* dark-mode sidebar submenu popup */
+.ant-menu-dark .ant-menu-inline.ant-menu-sub {
+  background: color-mix(in oklch, var(--sidebar-foreground) 6%, var(--sidebar)) !important;
+  box-shadow: none !important;
+}
+.ant-tag {
+  border-radius: calc(var(--radius) * 0.5);
+  border-color: var(--border);
+}
+.ant-tabs-tab { color: var(--muted-foreground) !important; }
+.ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--primary) !important; }
+.ant-tabs-ink-bar { background: var(--primary) !important; }
+/*
+ * 分页当前页：这里原来只描边、字用 --primary，但上面 7.6 节把当前页底色改成了
+ * 实心 --primary，两条规则叠在一起就是「蓝底蓝字」，页码看不见（实测对比度 1.0）。
+ * 统一交给 7.6 节处理，这里不再重复定义。
+ */
+.ant-alert { border-radius: calc(var(--radius) * 0.7); }
+
+/* 7) Dashmix form/table/button */
+#page-container .btn {
+  border-radius: calc(var(--radius) * 0.7);
+  font-weight: 500;
+}
+#page-container .btn-primary,
+#page-container .btn-alt-primary {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+}
+#page-container .btn-secondary,
+#page-container .btn-alt-secondary {
+  background: var(--secondary) !important;
+  border-color: var(--border) !important;
+  color: var(--secondary-foreground) !important;
+}
+#page-container .btn-secondary:hover,
+#page-container .btn-alt-secondary:hover {
+  background: color-mix(in oklch, var(--foreground) 10%, transparent) !important;
+}
+#page-container .form-control,
+#page-container .form-select {
+  background: var(--background) !important;
+  color: var(--foreground) !important;
+  border-color: var(--input) !important;
+  border-radius: calc(var(--radius) * 0.7);
+}
+#page-container .form-control:focus {
+  border-color: var(--ring) !important;
+  box-shadow: 0 0 0 0.15rem color-mix(in oklch, var(--ring) 25%, transparent) !important;
+}
+#page-container .form-control::placeholder { color: var(--muted-foreground) !important; }
+#page-container label,
+#page-container .form-label { color: var(--foreground); }
+#page-container .table { color: var(--foreground); }
+#page-container .table thead th {
+  color: var(--muted-foreground);
+  border-color: var(--border);
+  background: color-mix(in oklch, var(--foreground) 3%, var(--background));
+}
+#page-container .table td,
+#page-container .table th { border-color: var(--border); }
+#page-container .table-hover tbody tr:hover {
+  background-color: color-mix(in oklch, var(--foreground) 4%, transparent);
+}
+#page-container ::-webkit-scrollbar { width: 10px; height: 10px; }
+#page-container ::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--foreground) 22%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+#page-container ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--foreground) 32%, transparent);
+  background-clip: content-box;
+}
+#page-container ::-webkit-scrollbar-track { background: transparent; }
+
+/* =============================================================================
+   7.5) Dashmix 语义色工具类
+   -----------------------------------------------------------------------------
+   umi.css 里这几组是写死的 Bootstrap 亮色值，暗色模式下会翻车：
+     .alert-*  浅肉色底 + 浅灰字，实测对比度 1.55，基本读不了
+     .text-black / .text-dark  纯黑字压在暗底上，实测 1.46
+     .bg-white / .bg-light     亮色板块
+   这里按语义色重新着色。只改颜色，不动尺寸/间距/圆角以外的任何结构。
+   ============================================================================= */
+
+/* 语义色本身（浅色与暗色各自取值见 tokens 段） */
+#page-container {
+  --sem-primary: var(--primary);
+  --sem-success: var(--success);
+  --sem-danger: var(--destructive);
+  --sem-warning: var(--warning);
+  --sem-info: var(--info);
+}
+
+/* --- 文字色 --- */
+#page-container .text-black,
+#page-container .text-dark,
+#page-container .text-body {
+  color: var(--foreground) !important;
+}
+/*
+ * .text-white 不能一律映射成白色。
+ * 原版这个类是给「深色页头/侧栏」上的文字用的，但皮肤在浅色模式下
+ * 把页头和侧栏也变成了浅底，白字就没了（实测页面标题 r=1.00，完全隐形）。
+ * 所以默认跟随 --foreground，只有确实压在彩色实底上时才保持白字。
+ */
+#page-container .text-white { color: var(--foreground) !important; }
+#page-container .bg-primary .text-white,
+#page-container .bg-success .text-white,
+#page-container .bg-danger .text-white,
+#page-container .bg-warning .text-white,
+#page-container .bg-info .text-white,
+#page-container .bg-dark .text-white,
+#page-container .btn-primary .text-white,
+#page-container .btn-success .text-white,
+#page-container .btn-danger .text-white,
+#page-container .btn-info .text-white,
+#page-container .btn-primary,
+#page-container .btn-success,
+#page-container .btn-danger,
+#page-container .btn-info {
+  color: var(--primary-foreground) !important;
+}
+#page-container .text-primary { color: var(--sem-primary) !important; }
+#page-container .text-secondary { color: var(--muted-foreground) !important; }
+#page-container .text-success { color: var(--sem-success) !important; }
+#page-container .text-danger { color: var(--sem-danger) !important; }
+#page-container .text-warning { color: var(--sem-warning) !important; }
+#page-container .text-info { color: var(--sem-info) !important; }
+
+/* --- 块背景 --- */
+#page-container .bg-white,
+#page-container .bg-body,
+#page-container .bg-light {
+  background-color: var(--card) !important;
+  color: var(--card-foreground);
+}
+#page-container .bg-black,
+#page-container .bg-dark {
+  background-color: color-mix(in oklch, var(--foreground) 8%, var(--background)) !important;
+  color: var(--foreground);
+}
+#page-container .bg-primary { background-color: var(--primary-solid) !important; color: var(--primary-foreground); }
+#page-container .bg-secondary { background-color: var(--secondary) !important; color: var(--secondary-foreground); }
+#page-container .bg-success { background-color: var(--sem-success) !important; color: var(--primary-foreground); }
+#page-container .bg-danger { background-color: var(--sem-danger) !important; color: var(--primary-foreground); }
+#page-container .bg-warning { background-color: var(--sem-warning) !important; color: var(--primary-foreground); }
+#page-container .bg-info { background-color: var(--sem-info) !important; color: var(--primary-foreground); }
+
+/* --- 提示条：改成同色系淡底 + 左侧色条，字用同色系亮色 --- */
+#page-container .alert {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background-color: color-mix(in oklch, var(--foreground) 5%, var(--background));
+  color: var(--foreground);
+}
+#page-container .alert .alert-heading,
+#page-container .alert p,
+#page-container .alert a { color: inherit !important; }
+
+#page-container .alert-primary,
+#page-container .alert-secondary,
+#page-container .alert-success,
+#page-container .alert-danger,
+#page-container .alert-warning,
+#page-container .alert-info,
+#page-container .alert-light,
+#page-container .alert-dark {
+  background-color: color-mix(in oklch, var(--alert-tone) 14%, var(--background)) !important;
+  border-color: color-mix(in oklch, var(--alert-tone) 34%, transparent) !important;
+  border-left: 3px solid var(--alert-tone) !important;
+  color: color-mix(in oklch, var(--alert-tone) 72%, var(--foreground)) !important;
+}
+#page-container .alert-primary { --alert-tone: var(--sem-primary); }
+#page-container .alert-secondary { --alert-tone: var(--muted-foreground); }
+#page-container .alert-success { --alert-tone: var(--sem-success); }
+#page-container .alert-danger { --alert-tone: var(--sem-danger); }
+#page-container .alert-warning { --alert-tone: var(--sem-warning); }
+#page-container .alert-info { --alert-tone: var(--sem-info); }
+#page-container .alert-light { --alert-tone: var(--muted-foreground); }
+#page-container .alert-dark { --alert-tone: var(--foreground); }
+
+/* --- 徽标 --- */
+#page-container .badge {
+  border-radius: calc(var(--radius) * 0.5);
+  font-weight: 600;
+}
+#page-container .badge-primary { background-color: var(--primary-solid) !important; color: var(--primary-foreground) !important; }
+#page-container .badge-secondary { background-color: var(--secondary) !important; color: var(--secondary-foreground) !important; }
+/*
+ * success / warning 这两个色本身亮度偏高，配白字实测只有 r=2.47，
+ * 所以这两个用深色字；primary/danger/info 偏暗，继续用白字。
+ */
+#page-container .badge-success { background-color: var(--sem-success) !important; color: oklch(0.16 0 0) !important; }
+#page-container .badge-warning { background-color: var(--sem-warning) !important; color: oklch(0.16 0 0) !important; }
+#page-container .badge-danger { background-color: var(--sem-danger) !important; color: var(--primary-foreground) !important; }
+#page-container .badge-info { background-color: var(--sem-info) !important; color: var(--primary-foreground) !important; }
+#page-container .badge-light { background-color: var(--muted) !important; color: var(--foreground) !important; }
+#page-container .badge-dark {
+  background-color: color-mix(in oklch, var(--foreground) 12%, var(--background)) !important;
+  color: var(--foreground) !important;
+}
+
+/* =============================================================================
+   7.6) 巡检补漏
+   -----------------------------------------------------------------------------
+   跑了 19 个页面的计算样式巡检（暗色下找浅底块 + 对比度 <3 的文字），
+   下面每一条都是实测命中的，后面注明命中页面数，不是照着组件清单空写的。
+   ============================================================================= */
+
+/* --- Bootstrap/Dashmix 卡片：umi.css 写死 background-color:#fff（命中 3 页） --- */
+#page-container .card {
+  background-color: var(--card) !important;
+  color: var(--card-foreground);
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-sm);
+}
+#page-container .card-header,
+#page-container .card-footer {
+  background-color: color-mix(in oklch, var(--muted) 45%, transparent) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground);
+}
+#page-container .card-body { color: var(--card-foreground); }
+
+/* --- 非 antd 的 .btn 系（命中 web-push、config/theme，实测 r=1.05） --- */
+#page-container .btn {
+  border-radius: calc(var(--radius) * 0.7);
+}
+#page-container .btn-secondary,
+#page-container .btn-light,
+#page-container .btn-default {
+  background-color: var(--secondary) !important;
+  border-color: var(--border) !important;
+  color: var(--secondary-foreground) !important;
+}
+#page-container .btn-secondary:hover,
+#page-container .btn-light:hover,
+#page-container .btn-default:hover {
+  background-color: color-mix(in oklch, var(--secondary) 80%, var(--foreground) 8%) !important;
+}
+#page-container .btn-primary {
+  background-color: var(--primary-solid) !important;
+  border-color: var(--primary-solid) !important;
+  color: var(--primary-foreground) !important;
+}
+#page-container .btn-danger {
+  background-color: var(--destructive) !important;
+  border-color: var(--destructive) !important;
+  color: var(--primary-foreground) !important;
+}
+#page-container .btn-outline-secondary,
+#page-container .btn-outline-primary,
+#page-container .btn-outline-light,
+#page-container .btn-outline-dark {
+  background-color: transparent !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+}
+#page-container .btn-outline-secondary:hover,
+#page-container .btn-outline-primary:hover,
+#page-container .btn-outline-light:hover,
+#page-container .btn-outline-dark:hover {
+  background-color: color-mix(in oklch, var(--foreground) 8%, transparent) !important;
+  color: var(--foreground) !important;
+}
+
+/*
+ * Dashmix 的 .btn-alt-* 是「淡色实心」按钮，8 个变体全是硬编码浅色
+ * （如 .btn-alt-danger = rgb(246,196,177)），暗色下就是一块浅肉色。
+ * 实测命中 web-push、config/theme 页。
+ */
+#page-container .btn-alt-primary { --btn-tone: var(--primary); }
+#page-container .btn-alt-secondary { --btn-tone: var(--muted-foreground); }
+#page-container .btn-alt-success { --btn-tone: var(--success); }
+#page-container .btn-alt-danger { --btn-tone: var(--destructive); }
+#page-container .btn-alt-warning { --btn-tone: var(--warning); }
+#page-container .btn-alt-info { --btn-tone: var(--info); }
+#page-container .btn-alt-light { --btn-tone: var(--muted-foreground); }
+#page-container .btn-alt-dark { --btn-tone: var(--foreground); }
+#page-container .btn-alt-primary,
+#page-container .btn-alt-secondary,
+#page-container .btn-alt-success,
+#page-container .btn-alt-danger,
+#page-container .btn-alt-warning,
+#page-container .btn-alt-info,
+#page-container .btn-alt-light,
+#page-container .btn-alt-dark {
+  background-color: color-mix(in oklch, var(--btn-tone) 16%, var(--background)) !important;
+  border-color: color-mix(in oklch, var(--btn-tone) 32%, transparent) !important;
+  color: color-mix(in oklch, var(--btn-tone) 76%, var(--foreground)) !important;
+}
+#page-container .btn-alt-primary:hover,
+#page-container .btn-alt-secondary:hover,
+#page-container .btn-alt-success:hover,
+#page-container .btn-alt-danger:hover,
+#page-container .btn-alt-warning:hover,
+#page-container .btn-alt-info:hover,
+#page-container .btn-alt-light:hover,
+#page-container .btn-alt-dark:hover {
+  background-color: color-mix(in oklch, var(--btn-tone) 26%, var(--background)) !important;
+}
+
+/*
+ * .text-black-25/50/75 与 .text-white-25/50/75 是 rgba 定值，
+ * 暗色下黑字系列直接看不见（实测 .text-black-75 r=2.01）。
+ * 按不透明度映射到 foreground 的不同混合比。
+ */
+#page-container .text-black-75,
+#page-container .text-white-75 { color: color-mix(in oklch, var(--foreground) 88%, transparent) !important; }
+/* 彩色实底上的 .text-white-XX 同理要保持浅色 */
+#page-container .bg-primary .text-white-75,
+#page-container .bg-primary .text-white-50,
+#page-container .bg-dark .text-white-75,
+#page-container .bg-dark .text-white-50 {
+  color: color-mix(in oklch, var(--primary-foreground) 78%, transparent) !important;
+}
+#page-container .text-black-50,
+#page-container .text-white-50 { color: color-mix(in oklch, var(--foreground) 58%, transparent) !important; }
+#page-container .text-black-25,
+#page-container .text-white-25 { color: color-mix(in oklch, var(--foreground) 40%, transparent) !important; }
+
+/*
+ * .bg-white-* / .bg-black-* 半透明底纹（14 个）。
+ * 主题配置页的卡片用的是 .bg-white-30 之类，暗色下 30% 白会把上面的文字冲淡
+ * （实测标题 r=2.66、说明 r=2.19）。这里把「白色遮罩」翻转成「前景色遮罩」，
+ * 亮/暗两套主题下都是同一个方向的提亮。
+ */
+#page-container .bg-white-5,
+#page-container .bg-black-5 { background-color: color-mix(in oklch, var(--foreground) 4%, transparent) !important; }
+#page-container .bg-white-10,
+#page-container .bg-black-10 { background-color: color-mix(in oklch, var(--foreground) 7%, transparent) !important; }
+#page-container .bg-white-25,
+#page-container .bg-black-25 { background-color: color-mix(in oklch, var(--foreground) 12%, transparent) !important; }
+#page-container .bg-white-50,
+#page-container .bg-black-50 { background-color: color-mix(in oklch, var(--foreground) 18%, transparent) !important; }
+#page-container .bg-white-75,
+#page-container .bg-black-75 { background-color: color-mix(in oklch, var(--foreground) 24%, transparent) !important; }
+#page-container .bg-white-90,
+#page-container .bg-black-90,
+#page-container .bg-white-95,
+#page-container .bg-black-95 { background-color: color-mix(in oklch, var(--foreground) 30%, transparent) !important; }
+
+/*
+ * 主题配置页的卡片：原版是「白色渐变磨砂板 + 深色字」盖在一张背景照片上
+ *   .bg-gd-white-op-l{background: linear-gradient(-90deg, #fff/.3, #fff/.98) !important}
+ * 皮肤把字改成了亮色，遮罩还是白的 → 亮字压白板（实测 r=2.19~2.80）。
+ * 这里把遮罩换成用 --card 取色：浅色模式下依旧接近白（和原版一致），
+ * 暗色模式下自动变成深色磨砂，照片仍然透出来，文字方向不用改。
+ */
+#page-container .bg-gd-white-op-l {
+  background: linear-gradient(
+    -90deg,
+    color-mix(in oklch, var(--card) 30%, transparent) 0,
+    color-mix(in oklch, var(--card) 96%, transparent) 50%,
+    color-mix(in oklch, var(--card) 96%, transparent) 100%
+  ) !important;
+}
+#page-container .bg-gd-white-op-r {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--card) 30%, transparent) 0,
+    color-mix(in oklch, var(--card) 96%, transparent) 50%,
+    color-mix(in oklch, var(--card) 96%, transparent) 100%
+  ) !important;
+}
+#page-container .bg-gd-white-op-rl {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--card) 30%, transparent) 0,
+    color-mix(in oklch, var(--card) 96%, transparent) 50%,
+    color-mix(in oklch, var(--card) 30%, transparent) 100%
+  ) !important;
+}
+
+/* --- 表格里 .text-muted 的说明行 --- */
+#page-container td.text-muted,
+#page-container th.text-muted {
+  color: var(--muted-foreground) !important;
+}
+
+/*
+ * Bootstrap 表格（非 antd 的那些，如 OAuth / Web Push 页用的 .table）。
+ * umi.css 里全是硬编码浅色：
+ *   .table                              color:#495057
+ *   .table-striped tbody tr:nth-of-type(odd)  background:#f6f7fb
+ *   .table-hover tbody tr:hover         background:#ebeff6
+ * 之前皮肤没覆盖，暗色下就是浅底行 + 灰字（实测斑马行 r=1.87）。
+ */
+#page-container .table {
+  color: var(--foreground);
+}
+#page-container .table th,
+#page-container .table td {
+  border-color: var(--border) !important;
+}
+#page-container .table thead th {
+  color: var(--muted-foreground);
+  border-bottom-color: var(--border) !important;
+}
+#page-container .table-striped tbody tr:nth-of-type(odd) {
+  background-color: color-mix(in oklch, var(--foreground) 3%, transparent) !important;
+}
+#page-container .table-hover tbody tr:hover {
+  background-color: color-mix(in oklch, var(--foreground) 6%, transparent) !important;
+  color: var(--foreground) !important;
+}
+/* 语义色行（.table-primary/-success/... 共 8 种）改成淡染而不是实心浅色 */
+#page-container .table-primary,
+#page-container .table-primary > td,
+#page-container .table-primary > th { --row-tone: var(--primary); }
+#page-container .table-secondary,
+#page-container .table-secondary > td,
+#page-container .table-secondary > th { --row-tone: var(--muted-foreground); }
+#page-container .table-success,
+#page-container .table-success > td,
+#page-container .table-success > th { --row-tone: var(--success); }
+#page-container .table-danger,
+#page-container .table-danger > td,
+#page-container .table-danger > th { --row-tone: var(--destructive); }
+#page-container .table-warning,
+#page-container .table-warning > td,
+#page-container .table-warning > th { --row-tone: var(--warning); }
+#page-container .table-info,
+#page-container .table-info > td,
+#page-container .table-info > th { --row-tone: var(--info); }
+#page-container .table-light,
+#page-container .table-light > td,
+#page-container .table-light > th { --row-tone: var(--muted-foreground); }
+#page-container .table-dark,
+#page-container .table-dark > td,
+#page-container .table-dark > th { --row-tone: var(--foreground); }
+#page-container .table-primary,
+#page-container .table-primary > td,
+#page-container .table-primary > th,
+#page-container .table-secondary,
+#page-container .table-secondary > td,
+#page-container .table-secondary > th,
+#page-container .table-success,
+#page-container .table-success > td,
+#page-container .table-success > th,
+#page-container .table-danger,
+#page-container .table-danger > td,
+#page-container .table-danger > th,
+#page-container .table-warning,
+#page-container .table-warning > td,
+#page-container .table-warning > th,
+#page-container .table-info,
+#page-container .table-info > td,
+#page-container .table-info > th,
+#page-container .table-light,
+#page-container .table-light > td,
+#page-container .table-light > th,
+#page-container .table-dark,
+#page-container .table-dark > td,
+#page-container .table-dark > th {
+  background-color: color-mix(in oklch, var(--row-tone) 14%, var(--background)) !important;
+  border-color: color-mix(in oklch, var(--row-tone) 30%, transparent) !important;
+  color: var(--foreground) !important;
+}
+
+/* =============================================================================
+   antd 部分：以下选择器在 custom.css 和 umi.css 里都没有，
+   全部来自 components.chunk.css 的 antd 默认亮色主题，皮肤此前完全没覆盖。
+   ============================================================================= */
+
+/* --- 默认按钮：白底（命中 11 页，最高频） --- */
+.ant-btn {
+  background-color: var(--secondary) !important;
+  border-color: var(--border) !important;
+  color: var(--secondary-foreground) !important;
+}
+.ant-btn:hover,
+.ant-btn:focus {
+  background-color: color-mix(in oklch, var(--secondary) 80%, var(--foreground) 8%) !important;
+  border-color: color-mix(in oklch, var(--primary) 55%, var(--border)) !important;
+  color: var(--foreground) !important;
+}
+/* primary / danger / link / 文字按钮不能被上面的默认色盖掉 */
+.ant-btn-primary {
+  background-color: var(--primary-solid) !important;
+  border-color: var(--primary-solid) !important;
+  color: var(--primary-foreground) !important;
+}
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
+  background-color: color-mix(in oklch, var(--primary) 88%, white 12%) !important;
+  color: var(--primary-foreground) !important;
+}
+.ant-btn-danger {
+  background-color: var(--destructive) !important;
+  border-color: var(--destructive) !important;
+  color: var(--primary-foreground) !important;
+}
+.ant-btn-link,
+.ant-btn-text {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  color: var(--primary) !important;
+}
+.ant-btn[disabled],
+.ant-btn[disabled]:hover {
+  background-color: var(--muted) !important;
+  border-color: var(--border) !important;
+  color: var(--muted-foreground) !important;
+}
+
+/* --- 表格容器与空态：白底（命中 8 页） --- */
+.ant-table-fixed,
+.ant-table-placeholder,
+.ant-table-body,
+.ant-table-content {
+  background-color: transparent !important;
+  color: var(--foreground);
+}
+.ant-table-placeholder {
+  border-color: var(--border) !important;
+}
+.ant-empty-description {
+  color: var(--muted-foreground) !important;
+}
+/* 空态插画是浅色线条，暗色下压一下亮度免得刺眼 */
+.ant-empty-img-simple-ellipse,
+.ant-empty-img-simple-path,
+.ant-empty-img-simple-g { opacity: 0.55; }
+
+/* --- 表格行 hover / 固定列 --- */
+.ant-table-tbody > tr:hover > td,
+.ant-table-tbody > tr.ant-table-row-hover > td {
+  background-color: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
+}
+.ant-table-fixed-left .ant-table-fixed,
+.ant-table-fixed-right .ant-table-fixed {
+  background-color: var(--card) !important;
+}
+
+/*
+ * 操作列的下拉触发链接。
+ * 用 var(--primary) 时实测只有 r=2.84，仍低于 3；暗色下要把亮度提上来，
+ * 所以掺一点前景色。浅色模式下 --primary 本身对比足够，用 light-dark 分开取值。
+ */
+a.ant-dropdown-trigger,
+.ant-dropdown-menu-item > a,
+.ant-table a {
+  color: color-mix(in oklch, var(--primary) 62%, var(--foreground)) !important;
+}
+a.ant-dropdown-trigger:hover,
+.ant-dropdown-menu-item > a:hover,
+.ant-table a:hover { color: var(--foreground) !important; }
+
+/* --- 标签：默认与各语义色（命中 3 页，.ant-tag-green 实测 r=2.21） --- */
+.ant-tag {
+  background-color: color-mix(in oklch, var(--foreground) 8%, var(--background)) !important;
+  border-color: var(--border) !important;
+  color: var(--foreground) !important;
+  border-radius: calc(var(--radius) * 0.5) !important;
+}
+.ant-tag-green,
+.ant-tag-success { --tag-tone: var(--success); }
+.ant-tag-red,
+.ant-tag-error { --tag-tone: var(--destructive); }
+.ant-tag-orange,
+.ant-tag-gold,
+.ant-tag-yellow,
+.ant-tag-warning { --tag-tone: var(--warning); }
+.ant-tag-blue,
+.ant-tag-geekblue,
+.ant-tag-processing { --tag-tone: var(--info); }
+.ant-tag-purple,
+.ant-tag-magenta,
+.ant-tag-pink { --tag-tone: oklch(0.62 0.19 320); }
+.ant-tag-cyan { --tag-tone: oklch(0.68 0.12 195); }
+.ant-tag-green,
+.ant-tag-success,
+.ant-tag-red,
+.ant-tag-error,
+.ant-tag-orange,
+.ant-tag-gold,
+.ant-tag-yellow,
+.ant-tag-warning,
+.ant-tag-blue,
+.ant-tag-geekblue,
+.ant-tag-processing,
+.ant-tag-purple,
+.ant-tag-magenta,
+.ant-tag-pink,
+.ant-tag-cyan {
+  background-color: color-mix(in oklch, var(--tag-tone) 16%, var(--background)) !important;
+  border-color: color-mix(in oklch, var(--tag-tone) 38%, transparent) !important;
+  color: color-mix(in oklch, var(--tag-tone) 78%, var(--foreground)) !important;
+}
+
+/* --- 单选按钮组（工单页的状态筛选，白底） --- */
+.ant-radio-button-wrapper {
+  background-color: var(--secondary) !important;
+  border-color: var(--border) !important;
+  color: var(--secondary-foreground) !important;
+}
+.ant-radio-button-wrapper:hover {
+  color: var(--foreground) !important;
+}
+.ant-radio-button-wrapper-checked {
+  background-color: var(--primary-solid) !important;
+  border-color: var(--primary-solid) !important;
+  color: var(--primary-foreground) !important;
+}
+.ant-radio-button-wrapper-checked::before,
+.ant-radio-button-wrapper::before {
+  background-color: var(--border) !important;
+}
+
+/* --- 抽屉：节点编辑等都是抽屉，此前完全没覆盖 --- */
+.ant-drawer-content,
+.ant-drawer-wrapper-body {
+  background-color: var(--card) !important;
+  color: var(--card-foreground) !important;
+}
+.ant-drawer-header {
+  background-color: var(--card) !important;
+  border-bottom-color: var(--border) !important;
+}
+.ant-drawer-title,
+.ant-drawer-close { color: var(--foreground) !important; }
+/*
+ * 抽屉体内的表单：抽屉在 body 下，既不在 #root 也不在 #page-container 里，
+ * 所以 .text-muted / 内联 color 那些补丁都覆盖不到，得在这里单独接一遍。
+ */
+.ant-drawer-body { color: var(--card-foreground) !important; }
+.ant-drawer-body label,
+.ant-modal-body label { color: var(--foreground) !important; }
+.ant-drawer-body div[style*='color: rgb(102, 102, 102)'],
+.ant-drawer-body span[style*='color: rgb(102, 102, 102)'],
+.ant-modal-body div[style*='color: rgb(102, 102, 102)'],
+.ant-modal-body span[style*='color: rgb(102, 102, 102)'] {
+  color: var(--muted-foreground) !important;
+}
+.ant-drawer-body .text-muted,
+.ant-modal-body .text-muted { color: var(--muted-foreground) !important; }
+/*
+ * 抽屉/弹窗里的普通链接（「添加权限组」「编辑配置」「编辑填充方案」「更多解答」）
+ * 用的是 antd/umi 的默认蓝，暗色下实测 r=2.58。和表格里的链接同样处理：
+ * 掺前景色提亮。
+ */
+.ant-drawer-body a,
+.ant-modal-body a {
+  color: color-mix(in oklch, var(--primary) 62%, var(--foreground)) !important;
+}
+.ant-drawer-body a:hover,
+.ant-modal-body a:hover { color: var(--foreground) !important; }
+
+/* =============================================================================
+   编辑抽屉/弹窗：尺寸观感回到原版
+   -----------------------------------------------------------------------------
+   实测抽屉里的控件高度(32px)、内距(4px 11px)、字号(14px)、表单组间距(20px)
+   本来就和原版 antd 完全一致，皮肤只改了两处让手感变了：
+     圆角  4px → 8.4px（calc(var(--radius)*0.7)）
+     按钮字重 400 → 500
+   这里在编辑面板内退回原版值，只回尺寸，不动配色。
+   ============================================================================= */
+.ant-drawer-body .ant-input,
+.ant-drawer-body .ant-input-affix-wrapper,
+.ant-drawer-body .ant-select-selection,
+.ant-drawer-body .ant-input-number,
+.ant-drawer-body .ant-calendar-picker-input,
+.ant-drawer-body .ant-btn,
+.ant-drawer-body .ant-input-group-addon,
+.ant-modal-body .ant-input,
+.ant-modal-body .ant-input-affix-wrapper,
+.ant-modal-body .ant-select-selection,
+.ant-modal-body .ant-input-number,
+.ant-modal-body .ant-calendar-picker-input,
+.ant-modal-body .ant-btn,
+.ant-modal-body .ant-input-group-addon,
+.v2board-drawer-action .ant-btn {
+  border-radius: 4px !important;
+}
+/* 输入框带前后缀时，圆角只留外侧那半边（antd 原版行为） */
+.ant-drawer-body .ant-input-group > .ant-input:first-child,
+.ant-modal-body .ant-input-group > .ant-input:first-child {
+  border-radius: 4px 0 0 4px !important;
+}
+.ant-drawer-body .ant-input-group-addon:last-child,
+.ant-modal-body .ant-input-group-addon:last-child {
+  border-radius: 0 4px 4px 0 !important;
+}
+.ant-drawer-body .ant-btn,
+.ant-modal-body .ant-btn,
+.v2board-drawer-action .ant-btn {
+  font-weight: 400 !important;
+}
+
+/* 抽屉底部的按钮条，v2board 自己的类，umi.css 里写死 #fff */
+.v2board-drawer-action {
+  background-color: var(--card) !important;
+  border-top: 1px solid var(--border) !important;
+}
+
+/* 输入框左右的附加块（倍率的「x」、带宽的「Mbps」），antd 默认是 #fafafa */
+.ant-input-group-addon {
+  background-color: var(--secondary) !important;
+  border-color: var(--input) !important;
+  color: var(--secondary-foreground) !important;
+}
+.ant-drawer-footer { border-top-color: var(--border) !important; }
+.ant-drawer-mask { background-color: oklch(0 0 0 / 0.55) !important; }
+
+/* --- 弹窗的头/尾/标题（内容区此前已覆盖，这几处没有） --- */
+.ant-modal-header {
+  background-color: var(--card) !important;
+  border-bottom-color: var(--border) !important;
+}
+.ant-modal-title { color: var(--foreground) !important; }
+.ant-modal-close,
+.ant-modal-close-x { color: var(--muted-foreground) !important; }
+.ant-modal-footer { border-top-color: var(--border) !important; }
+.ant-modal-mask { background-color: oklch(0 0 0 / 0.55) !important; }
+.ant-modal-confirm-title,
+.ant-modal-confirm-content { color: var(--foreground) !important; }
+
+/*
+ * antd v3 的 .ant-tabs 容器带 `color: rgba(0,0,0,.65)`，
+ * 系统配置整页的字段标签都在 tabs 里、靠继承取色，
+ * 结果暗色下全是近黑字（实测 24 个元素 r=1.34，是本轮最严重的一处）。
+ * 把容器颜色接回 --foreground，后代自然就对了。
+ */
+.ant-tabs,
+.ant-tabs-content,
+.ant-tabs-tabpane {
+  color: var(--foreground) !important;
+}
+/*
+ * v3 里选中的页签就是 .ant-tabs-tab-active 本身（v4 才有 -tab-btn 这层）。
+ * 纯 --primary 在卡片底色上实测只有 r=2.84，掺前景色提亮到 3 以上。
+ */
+.ant-tabs-tab-active,
+.ant-tabs-tab-active a {
+  color: color-mix(in oklch, var(--primary) 58%, var(--foreground)) !important;
+}
+.ant-tabs-bar,
+.ant-tabs-nav-wrap { border-color: var(--border) !important; }
+
+/*
+ * 系统配置的字段说明是内联 `color: rgb(102,102,102)`（编译进 umi.js 的
+ * React inline style），没有类名可挂，只能按 style 属性选。实测 r=2.5。
+ */
+#page-container div[style*='color: rgb(102, 102, 102)'],
+#page-container span[style*='color: rgb(102, 102, 102)'],
+#page-container div[style*='color:#666'],
+#page-container div[style*='color: #666'] {
+  color: var(--muted-foreground) !important;
+}
+
+/* --- 全局轻提示 / 通知 / 气泡：挂在 body 下，不在 #root 里 --- */
+.ant-message-notice-content,
+.ant-notification-notice {
+  background-color: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.ant-notification-notice-message,
+.ant-notification-notice-description { color: var(--popover-foreground) !important; }
+.ant-tooltip-inner {
+  background-color: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.7);
+}
+/* v3 的箭头是 .ant-tooltip-arrow 本体（用 border 画），没有 -arrow-content */
+.ant-tooltip-placement-top .ant-tooltip-arrow { border-top-color: var(--popover) !important; }
+.ant-tooltip-placement-bottom .ant-tooltip-arrow { border-bottom-color: var(--popover) !important; }
+.ant-tooltip-placement-left .ant-tooltip-arrow { border-left-color: var(--popover) !important; }
+.ant-tooltip-placement-right .ant-tooltip-arrow { border-right-color: var(--popover) !important; }
+/* v3 气泡卡片：外层 .ant-popover-inner + 内容 .ant-popover-inner-content */
+.ant-popover-inner,
+.ant-popover-inner-content {
+  background-color: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+}
+.ant-popover-inner {
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow);
+}
+.ant-popover-title {
+  color: var(--foreground) !important;
+  border-bottom-color: var(--border) !important;
+}
+.ant-popover-arrow { border-color: var(--popover) !important; }
+/* 气泡确认框（删除确认用的就是这个） */
+.ant-popover-message-title { color: var(--foreground) !important; }
+
+/* 8) Existing custom feature pages — tokenized, layout preserved */
+.v2b-login-settings { max-width: 1120px; margin: 0 auto; }
 .v2b-provider-panel {
-    overflow: hidden;
-    background: #fff;
-    border: 1px solid #dfe3e8;
-    border-radius: 4px;
-    box-shadow: 0 1px 2px rgba(31, 45, 61, .04);
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
 }
-
-.v2b-provider-panel.is-open {
-    border-color: #cbd5e1;
-}
-
+.v2b-provider-panel.is-open { border-color: color-mix(in oklch, var(--border) 70%, var(--foreground)); }
 .v2b-provider-header {
-    display: flex;
-    min-height: 72px;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 12px 20px;
-    background: #fff;
+  display: flex; min-height: 72px; align-items: center; justify-content: space-between;
+  gap: 20px; padding: 12px 20px; background: var(--card);
 }
-
-.v2b-provider-panel.is-open .v2b-provider-header {
-    border-bottom: 1px solid #e7eaee;
-}
-
+.v2b-provider-panel.is-open .v2b-provider-header { border-bottom: 1px solid var(--border); }
 .v2b-provider-disclosure {
-    display: flex;
-    min-width: 0;
-    flex: 1 1 auto;
-    align-items: center;
-    gap: 14px;
-    padding: 4px 0;
-    color: #263238;
-    text-align: left;
-    background: transparent;
-    border: 0;
+  display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 14px;
+  padding: 4px 0; color: var(--foreground); text-align: left; background: transparent; border: 0;
 }
-
 .v2b-provider-disclosure:hover,
-.v2b-provider-disclosure:focus {
-    color: #0665d0;
-    outline: 0;
-}
-
+.v2b-provider-disclosure:focus { color: var(--primary); outline: 0; }
 .v2b-provider-disclosure:focus-visible {
-    box-shadow: 0 0 0 3px rgba(6, 101, 208, .18);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 30%, transparent);
 }
-
 .v2b-provider-disclosure > .fa {
-    width: 14px;
-    flex: 0 0 14px;
-    color: #718096;
-    font-size: 16px;
-    text-align: center;
+  width: 14px; flex: 0 0 14px; color: var(--muted-foreground); font-size: 16px; text-align: center;
 }
-
-.v2b-provider-heading {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.v2b-provider-name {
-    overflow-wrap: anywhere;
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 1.35;
-}
-
+.v2b-provider-heading { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.v2b-provider-name { overflow-wrap: anywhere; font-size: 16px; font-weight: 600; line-height: 1.35; }
 .v2b-provider-description {
-    overflow-wrap: anywhere;
-    color: #687386;
-    font-size: 12px;
-    line-height: 1.45;
+  overflow-wrap: anywhere; color: var(--muted-foreground); font-size: 12px; line-height: 1.45;
 }
-
-.v2b-provider-controls {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 14px;
-}
-
+.v2b-provider-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; }
 .v2b-provider-controls .badge {
-    min-width: 54px;
-    padding: 5px 8px;
-    font-size: 11px;
-    font-weight: 600;
+  min-width: 54px; padding: 5px 8px; font-size: 11px; font-weight: 600;
 }
-
-.v2b-provider-body {
-    padding: 0 20px;
-    background: #fff;
-}
-
+.v2b-provider-body { padding: 0 20px; background: var(--card); }
 .v2b-login-field {
-    min-height: 78px;
-    margin-right: 0;
-    margin-left: 0;
-    padding: 16px 0;
-    border-bottom: 1px solid #edf0f3;
+  min-height: 78px; margin-right: 0; margin-left: 0; padding: 16px 0; border-bottom: 1px solid var(--border);
 }
-
-.v2b-login-field:last-child {
-    border-bottom: 0;
-}
-
+.v2b-login-field:last-child { border-bottom: 0; }
 .v2b-login-field-label {
-    display: block;
-    margin-bottom: 5px;
-    color: #273444;
-    font-size: 14px;
-    font-weight: 600;
-    line-height: 1.4;
+  display: block; margin-bottom: 5px; color: var(--foreground); font-size: 14px; font-weight: 600; line-height: 1.4;
 }
-
-.v2b-login-field-help {
-    color: #6b7280;
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.v2b-login-field-control {
-    min-width: 0;
-    text-align: right;
-}
-
-.v2b-login-field-control .form-control {
-    width: 100%;
-    min-height: 38px;
-    font-size: 14px;
-}
-
-.v2b-secret-control,
-.v2b-callback-control {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-}
-
-.v2b-secret-control .form-control,
-.v2b-callback-control .form-control {
-    min-width: 0;
-    flex: 1 1 auto;
-}
-
-.v2b-secret-control .btn,
-.v2b-callback-control .btn {
-    min-height: 34px;
-    flex: 0 0 auto;
-    white-space: nowrap;
-}
-
+.v2b-login-field-help { color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.v2b-login-field-control { min-width: 0; text-align: right; }
+.v2b-login-field-control .form-control { width: 100%; min-height: 38px; font-size: 14px; }
+.v2b-secret-control, .v2b-callback-control { display: flex; min-width: 0; align-items: center; }
+.v2b-secret-control .form-control, .v2b-callback-control .form-control { min-width: 0; flex: 1 1 auto; }
+.v2b-secret-control .btn, .v2b-callback-control .btn { min-height: 34px; flex: 0 0 auto; white-space: nowrap; }
 .v2b-doc-link {
-    display: inline-flex;
-    max-width: 100%;
-    align-items: center;
-    overflow-wrap: anywhere;
-    text-align: left;
+  display: inline-flex; max-width: 100%; align-items: center; overflow-wrap: anywhere; text-align: left;
 }
-
-.v2b-provider-disabled,
-.v2b-login-empty {
-    padding: 28px 16px;
-    color: #6b7280;
-    font-size: 13px;
-    text-align: center;
+.v2b-provider-disabled, .v2b-login-empty {
+  padding: 28px 16px; color: var(--muted-foreground); font-size: 13px; text-align: center;
 }
-
 .v2b-login-error {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 22px;
-    color: #7f1d1d;
-    background: #fff7f7;
-    border: 1px solid #f3c4c4;
-    border-radius: 4px;
+  display: flex; align-items: flex-start; gap: 14px; padding: 22px;
+  color: color-mix(in oklch, var(--destructive) 80%, var(--foreground));
+  background: color-mix(in oklch, var(--destructive) 10%, var(--background));
+  border: 1px solid color-mix(in oklch, var(--destructive) 35%, var(--border));
+  border-radius: var(--radius);
 }
-
-.v2b-login-error > .fa {
-    margin-top: 2px;
-    font-size: 18px;
-}
-
+.v2b-login-error > .fa { margin-top: 2px; font-size: 18px; }
 .v2b-login-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 16px;
-    padding: 16px 0 4px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 16px 0 4px;
 }
-
-.v2b-save-state {
-    color: #718096;
-    font-size: 12px;
-}
-
-.v2b-save-state.is-dirty {
-    color: #9a6700;
-}
-
-.v2b-login-actions .btn {
-    min-width: 150px;
-    min-height: 38px;
-    font-size: 14px;
-    font-weight: 600;
-}
+.v2b-save-state { color: var(--muted-foreground); font-size: 12px; }
+.v2b-save-state.is-dirty { color: var(--warning); }
+.v2b-login-actions .btn { min-width: 150px; min-height: 38px; font-size: 14px; font-weight: 600; }
 
 @media (max-width: 767.98px) {
-    .v2b-provider-header {
-        align-items: flex-start;
-        gap: 12px;
-        padding: 14px 16px;
-    }
-
-    .v2b-provider-disclosure {
-        gap: 10px;
-    }
-
-    .v2b-provider-controls {
-        flex-direction: column-reverse;
-        align-items: flex-end;
-        gap: 8px;
-    }
-
-    .v2b-provider-controls .badge {
-        min-width: 48px;
-    }
-
-    .v2b-provider-body {
-        padding: 0 16px;
-    }
-
-    .v2b-login-field {
-        min-height: 0;
-        padding: 15px 0;
-    }
-
-    .v2b-login-field-control {
-        margin-top: 12px;
-        text-align: left;
-    }
-
-    .v2b-secret-control,
-    .v2b-callback-control {
-        align-items: stretch;
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .v2b-secret-control .btn,
-    .v2b-callback-control .btn {
-        width: 100%;
-        margin-left: 0 !important;
-    }
-
-    .v2b-login-actions {
-        align-items: stretch;
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .v2b-save-state {
-        text-align: center;
-    }
-
-    .v2b-login-actions .btn {
-        width: 100%;
-    }
+  .v2b-provider-header { align-items: flex-start; gap: 12px; padding: 14px 16px; }
+  .v2b-provider-disclosure { gap: 10px; }
+  .v2b-provider-controls { flex-direction: column-reverse; align-items: flex-end; gap: 8px; }
+  .v2b-provider-controls .badge { min-width: 48px; }
+  .v2b-provider-body { padding: 0 16px; }
+  .v2b-login-field { min-height: 0; padding: 15px 0; }
+  .v2b-login-field-control { margin-top: 12px; text-align: left; }
+  .v2b-secret-control, .v2b-callback-control { align-items: stretch; flex-direction: column; gap: 8px; }
+  .v2b-secret-control .btn, .v2b-callback-control .btn { width: 100%; margin-left: 0 !important; }
+  .v2b-login-actions { align-items: stretch; flex-direction: column; gap: 8px; }
+  .v2b-save-state { text-align: center; }
+  .v2b-login-actions .btn { width: 100%; }
 }
 
-/* OAuth 管理 */
+/* OAuth / WebPush */
 .v2b-oauth-manage .v2b-oauth-table td { vertical-align: top; }
 .v2b-oauth-modal-mask {
   position: fixed; inset: 0; z-index: 10050;
-  background: rgba(15, 23, 42, 0.55);
-  display: flex; align-items: center; justify-content: center;
-  padding: 16px;
+  background: oklch(0 0 0 / 0.55);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .v2b-oauth-modal {
-  width: min(720px, 100%);
-  max-height: 90vh;
-  overflow: auto;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  width: min(720px, 100%); max-height: 90vh; overflow: auto;
+  background: var(--popover); color: var(--popover-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
 }
-.v2b-oauth-modal-lg {
-  width: min(920px, 100%);
-}
-.v2b-oauth-modal-header,
-.v2b-oauth-modal-footer {
+.v2b-oauth-modal-lg { width: min(920px, 100%); }
+.v2b-oauth-modal-header, .v2b-oauth-modal-footer {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
 }
-.v2b-oauth-modal-footer { border-bottom: 0; border-top: 1px solid #e5e7eb; justify-content: flex-end; }
+.v2b-oauth-modal-footer { border-bottom: 0; border-top: 1px solid var(--border); justify-content: flex-end; }
 .v2b-oauth-modal-body { padding: 18px; }
-.v2b-oauth-modal-header h4 { margin: 0; font-size: 16px; }
-.v2b-oauth-manage .btn-xs {
-  padding: 0.1rem 0.4rem;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-/* Web Push 管理 */
+.v2b-oauth-modal-header h4 { margin: 0; font-size: 16px; color: var(--foreground); }
+.v2b-oauth-manage .btn-xs { padding: 0.1rem 0.4rem; font-size: 11px; line-height: 1.4; }
 .v2b-webpush-manage .card-header .block-title { margin: 0; }
 .v2b-webpush-manage .form-control { min-height: 38px; }
 .v2b-webpush-manage textarea.form-control { min-height: 90px; }
 .v2b-webpush-manage .table td { vertical-align: top; }
 .v2b-webpush-manage .font-size-h4 { font-size: 1.35rem; }
+
+/* 9) Theme panel */
+.nb-theme-fab {
+  position: fixed; right: 20px; bottom: 20px; z-index: 11000;
+  width: 44px; height: 44px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--card); color: var(--foreground);
+  box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  font-size: 18px; line-height: 1;
+}
+.nb-theme-fab:hover { border-color: var(--primary); color: var(--primary); }
+.nb-theme-panel {
+  position: fixed; right: 20px; bottom: 74px; z-index: 11000;
+  width: 300px; max-width: calc(100vw - 40px);
+  background: var(--popover); color: var(--popover-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 16px; display: none; font-family: var(--nb-font);
+}
+.nb-theme-panel.is-open { display: block; }
+.nb-theme-panel h4 {
+  margin: 0 0 12px; font-size: 15px; font-weight: 700; color: var(--foreground);
+}
+.nb-theme-group { margin-bottom: 14px; }
+.nb-theme-group > label {
+  display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted-foreground);
+}
+.nb-seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.nb-seg button {
+  flex: 1 1 auto; min-width: 52px; padding: 6px 8px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--background); color: var(--foreground);
+  border-radius: calc(var(--radius) * 0.6);
+}
+.nb-seg button.is-active {
+  background: var(--primary); color: var(--primary-foreground); border-color: var(--primary);
+}
+.nb-swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.nb-swatch {
+  width: 26px; height: 26px; border-radius: 999px; cursor: pointer;
+  border: 2px solid transparent; box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.12);
+}
+.nb-swatch.is-active {
+  border-color: var(--foreground);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 40%, transparent);
+}

@@ -19,11 +19,15 @@
   --primary-foreground: oklch(1 0 0);
   /*
    * 「实底主色」：只用在白字压色块的地方（primary 按钮、分页当前页、徽标）。
-   * 浅色模式下 --primary 本身偏亮，白字实测只有 r=2.72，所以这里压暗到 0.56；
+   * 浅色模式下 --primary 本身偏亮，白字实测只有 r=2.72，所以这里压暗；
    * 链接、边框、强调色仍然用 --primary 原值，配色观感不变。
    * 暗色模式下 --primary 已经够暗（白字 r≈3.9），直接等于 --primary。
+   *
+   * 用 color-mix 从 --primary 派生而不是写死色值：预设块只改 --primary，
+   * 写死的话 8 个预设在浅色模式下的实底组件会全部卡在默认蓝（审查确认过的 bug）。
+   * 0.692 × 0.81 ≈ 0.56，与原先手调的深度一致。
    */
-  --primary-solid: oklch(0.56 0.16 243.716);
+  --primary-solid: color-mix(in oklch, var(--primary) 81%, black);
   --secondary: oklch(0.95 0 0);
   --secondary-foreground: oklch(0.42 0.16 250);
   --muted: oklch(0.97 0 0);
@@ -65,8 +69,11 @@
   --popover-foreground: oklch(0.965 0 0);
   --primary: oklch(0.54 0.142 248.516);
   --primary-foreground: oklch(1 0 0);
-  /* 暗色下主色已经够暗，实底不用再压 */
-  --primary-solid: var(--primary);
+  /*
+   * 暗色下也轻度压暗：多数暗色主色本身够暗，但 ocean-breeze 这类亮主色
+   * （L=0.68）白字实测只有 2.93，统一压 10% 后全部预设 ≥3.5 且观感不变。
+   */
+  --primary-solid: color-mix(in oklch, var(--primary) 90%, black);
   --secondary: oklch(0.335 0 0);
   --secondary-foreground: oklch(0.9 0.05 250);
   --muted: oklch(0.305 0 0);
@@ -165,6 +172,10 @@
   --sidebar-primary: oklch(0.6147 0.0867 154.73);
   --sidebar-accent: color-mix(in oklch, var(--primary) 20%, var(--background));
   --sidebar-accent-foreground: oklch(0.929 0.0095 255.53);
+  /* 面板着色与其它彩色预设一致（underground 已从通用组剔除，这几项要自带） */
+  --card: color-mix(in oklch, var(--primary) 8%, oklch(0.285 0 0));
+  --muted: color-mix(in oklch, var(--primary) 10%, oklch(0.305 0 0));
+  --sidebar: color-mix(in oklch, var(--primary) 8%, oklch(0.225 0 0));
 }
 
 [data-theme-preset='simple-large'] {
@@ -232,8 +243,11 @@
 [data-theme-preset='sunset-glow'] { --primary: oklch(0.5591 0.1882 25.33); --ring: var(--primary); --sidebar-primary: var(--primary); }
 .dark[data-theme-preset='sunset-glow'] { --primary: oklch(0.7 0.15 25); --ring: var(--primary); --sidebar-primary: var(--primary); }
 
-/* colored presets: derive accents from primary (exclude anthropic/simple-large/default) */
-[data-theme-preset='underground'],
+/*
+ * colored presets: derive accents from primary (exclude anthropic/simple-large/default)
+ * 注意不含 underground——它上面有自己的专属调校（14%/20% 混色、带色调前景），
+ * 同特异性下这组写在后面会把专属值整组盖掉变成死代码（审查确认过）。
+ */
 [data-theme-preset='ocean-breeze'],
 [data-theme-preset='rose-garden'],
 [data-theme-preset='forest-whisper'],
@@ -243,7 +257,6 @@
   --sidebar-accent: color-mix(in oklch, var(--primary) 12%, var(--background));
   --sidebar-accent-foreground: var(--primary);
 }
-.dark[data-theme-preset='underground'],
 .dark[data-theme-preset='ocean-breeze'],
 .dark[data-theme-preset='rose-garden'],
 .dark[data-theme-preset='forest-whisper'],
@@ -434,15 +447,11 @@ html, body {
   border-radius: calc(var(--radius) * 0.7) !important;
   font-weight: 500;
 }
-.ant-btn-primary {
-  background: var(--primary) !important;
-  border-color: var(--primary) !important;
-  color: var(--primary-foreground) !important;
-}
-.ant-btn-primary:hover,
-.ant-btn-primary:focus {
-  filter: brightness(1.05);
-}
+/*
+ * （原先这里有一组 .ant-btn-primary 早期规则：背景/边框被 7.6 节同名规则
+ * 完全遮蔽，唯独 :hover 的 filter:brightness(1.05) 会和后面的 hover 叠加
+ * 把本已偏亮的背景推得更亮——审查确认后整块删除，样式统一收敛到 7.6 节。）
+ */
 /*
  * 注意：这个后台是 antd v3（components.chunk.css 里 v4 类名 0 命中）。
  * 之前这里写的是 v4 的 .ant-select-selector / .ant-picker，实际匹配不上，
@@ -566,11 +575,22 @@ html, body {
 .ant-calendar-column-header { color: var(--foreground) !important; }
 .ant-calendar-date { color: var(--foreground) !important; border-radius: calc(var(--radius) * 0.5); }
 .ant-calendar-date:hover { background: var(--accent) !important; }
-.ant-calendar-selected-day .ant-calendar-date,
-.ant-calendar-today .ant-calendar-date {
-  background: var(--primary) !important;
+/* 选中日实底（白字压色块 → 用 --primary-solid，理由同按钮） */
+.ant-calendar-selected-day .ant-calendar-date {
+  background: var(--primary-solid) !important;
   color: var(--primary-foreground) !important;
+  border-color: var(--primary-solid) !important;
+}
+/* 「今天」照 antd 原版只描边，和选中日区分开（原先两者同款实底无法分辨） */
+.ant-calendar-today .ant-calendar-date {
+  background: transparent !important;
+  color: color-mix(in oklch, var(--primary) 62%, var(--foreground)) !important;
   border-color: var(--primary) !important;
+}
+/* 既是今天又被选中时，以选中样式为准 */
+.ant-calendar-selected-day.ant-calendar-today .ant-calendar-date {
+  background: var(--primary-solid) !important;
+  color: var(--primary-foreground) !important;
 }
 .ant-calendar-last-month-cell .ant-calendar-date,
 .ant-calendar-next-month-btn-day .ant-calendar-date { color: var(--muted-foreground) !important; }
@@ -1127,7 +1147,12 @@ html, body {
 }
 .ant-btn-primary:hover,
 .ant-btn-primary:focus {
-  background-color: color-mix(in oklch, var(--primary) 88%, white 12%) !important;
+  /*
+   * hover 往暗走而不是往亮走：基础态用 --primary-solid 就是为了保住白字对比度，
+   * 提亮 12% 白会把对比度打回 2.7 以下（等于把修复在 hover 态推翻）。
+   */
+  background-color: color-mix(in oklch, var(--primary-solid) 88%, black) !important;
+  border-color: color-mix(in oklch, var(--primary-solid) 88%, black) !important;
   color: var(--primary-foreground) !important;
 }
 .ant-btn-danger {
@@ -1135,11 +1160,30 @@ html, body {
   border-color: var(--destructive) !important;
   color: var(--primary-foreground) !important;
 }
+/*
+ * danger / link 必须有自己的 hover：上面通用 .ant-btn:hover 是两个类的特异性
+ * (0-2-0)，会压过这两个变体只有一个类的基础态——原版筛选抽屉里就有
+ * type:"danger" 的「重置」按钮，悬停会变成灰底灰字。
+ */
+.ant-btn-danger:hover,
+.ant-btn-danger:focus {
+  background-color: color-mix(in oklch, var(--destructive) 85%, black) !important;
+  border-color: color-mix(in oklch, var(--destructive) 85%, black) !important;
+  color: var(--primary-foreground) !important;
+}
 .ant-btn-link,
 .ant-btn-text {
   background-color: transparent !important;
   border-color: transparent !important;
   color: var(--primary) !important;
+}
+.ant-btn-link:hover,
+.ant-btn-link:focus,
+.ant-btn-text:hover,
+.ant-btn-text:focus {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  color: color-mix(in oklch, var(--primary) 62%, var(--foreground)) !important;
 }
 .ant-btn[disabled],
 .ant-btn[disabled]:hover {
@@ -1578,7 +1622,8 @@ a.ant-dropdown-trigger:hover,
   border-radius: calc(var(--radius) * 0.6);
 }
 .nb-seg button.is-active {
-  background: var(--primary); color: var(--primary-foreground); border-color: var(--primary);
+  /* 白字压实底 → 用 --primary-solid（浅色下 --primary 白字对比度不足） */
+  background: var(--primary-solid); color: var(--primary-foreground); border-color: var(--primary-solid);
 }
 .nb-swatches { display: flex; gap: 8px; flex-wrap: wrap; }
 .nb-swatch {

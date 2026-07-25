@@ -19,6 +19,8 @@ class V2nodeController extends Controller
             'parent_id' => 'nullable|integer',
             'host' => 'required',
             'listen_ip' => 'nullable',
+            // 纯备注（记录节点真实 IP），只存库展示，不下发到节点端
+            'ip_remark' => 'nullable|string|max:255',
             'port' => 'required',
             'server_port' => 'required',
             'protocol' => 'required|in:shadowsocks,vmess,vless,trojan,tuic,hysteria2,anytls',

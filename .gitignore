@@ -16,6 +16,7 @@
 .env
 .env.backup
 /.env.backup-*
+/.env.production.bak
 /.env.lock
 .phpunit.result.cache
 .idea
@@ -31,3 +32,6 @@ docker-compose.yml
 public/clients/*
 workerman.webman.php.pid
 workerman.log
+# admin-next 前端构建产物含 AGPL(new-api) 衍生代码，禁入公开仓库，走 scp 部署
+/public/assets/admin-next
+/storage/claude_backup_*

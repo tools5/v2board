@@ -167,6 +167,7 @@ class AdminRoute
             $router->get ('/giftcard/fetch', 'V1\\Admin\\GiftcardController@fetch');
             $router->post('/giftcard/generate', 'V1\\Admin\\GiftcardController@generate');
             $router->post('/giftcard/drop', 'V1\\Admin\\GiftcardController@drop');
+            $router->post('/giftcard/dropUsed', 'V1\\Admin\\GiftcardController@dropUsed');
             // Knowledge
             $router->get ('/knowledge/fetch', 'V1\\Admin\\KnowledgeController@fetch');
             $router->get ('/knowledge/getCategory', 'V1\\Admin\\KnowledgeController@getCategory');

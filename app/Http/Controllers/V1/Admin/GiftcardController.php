@@ -132,6 +132,34 @@ class GiftcardController extends Controller
         ]);
     }
 
+    /**
+     * 一键删除「已用完」的礼品卡。
+     *
+     * 语义刻意取「次数耗尽」（limit_use 非空且 <= 0），而不是「被兑换过」：
+     * used_user_ids 非空但 limit_use 还有剩余（或为 NULL 不限次）的多次卡
+     * 仍在流通，按「用过就删」会把用户手里的活卡作废。
+     *
+     * 删除集合在 SQL 的 WHERE 里现算而不是由前端传 id 列表：
+     * fetch 每页最多 100 条拼不全，且与并发兑换（redeem 会原地递减
+     * limit_use）之间存在竞态——现算能保证删的一定是此刻已耗尽的卡。
+     *
+     * 注意这是物理删除：卡片行内的 used_user_ids 是全系统唯一的兑换名单，
+     * 删除后「谁兑换过」不可再查（用户已到账的权益不受影响，
+     * 兑换时已直接写入 v2_user，与卡片行无关联）。
+     */
+    public function dropUsed()
+    {
+        $deleted = DB::transaction(function () {
+            return Giftcard::whereNotNull('limit_use')
+                ->where('limit_use', '<=', 0)
+                ->delete();
+        });
+
+        return response([
+            'data' => $deleted
+        ]);
+    }
+
     private function normalizeTypeSpecificFields(array &$giftcard)
     {
         if ((int)$giftcard['type'] !== 5) {

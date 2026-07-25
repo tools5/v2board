@@ -266,7 +266,7 @@ class StatisticalService {
 
     private function buildServerTrafficRank($limit)
     {
-        return StatServer::select([
+        $stats = StatServer::select([
             'server_id',
             'server_type',
             DB::raw('sum(u) as u'),
@@ -279,5 +279,17 @@ class StatisticalService {
             ->orderBy('total', 'DESC')
             ->limit($limit)
             ->get();
+
+        // 排行榜要显示节点名字而不是 #id（getServerLastRank 同款做法）；
+        // 已删除的节点找不到名字时留 null，前端回退显示 #id
+        $names = [];
+        foreach ((new ServerService())->getAllServers() as $server) {
+            $names[$server['type'] . '-' . $server['id']] = $server['name'];
+        }
+        foreach ($stats as $stat) {
+            $stat->server_name = $names[$stat->server_type . '-' . $stat->server_id] ?? null;
+        }
+
+        return $stats;
     }
 }

@@ -12,13 +12,22 @@
         $scriptAssets = array_values(array_filter($scriptMatches[1] ?? [], $assetFilter));
         $styleAssets = array_values(array_filter($styleMatches[1] ?? [], $assetFilter));
         if (!$scriptAssets) {
-            // 与构建产物 index.html 的三个 defer 脚本保持一致：
-            // 入口 index.js 依赖共享 chunk 948.js，漏掉它兜底页面起不来
-            $scriptAssets = [
-                '/assets/admin-next/static/js/lib-react.js',
-                '/assets/admin-next/static/js/948.js',
-                '/assets/admin-next/static/js/index.js',
-            ];
+            // 兜底：index.html 缺失/解析失败时按目录实际文件构造。
+            // 不能写死 chunk 名——共享 chunk 的编号（948.js/698.js…）每次构建都会漂移，
+            // 写死的列表在下一次构建后就是坏的。lib-react 排最前、入口 index 排最后，
+            // 其余 chunk 居中（都是 defer，webpack 运行时会等依赖就位，顺序仅求稳妥）。
+            $jsFiles = glob(public_path('assets/admin-next/static/js/*.js')) ?: [];
+            $scriptAssets = array_map(function ($file) {
+                return '/assets/admin-next/static/js/' . basename($file);
+            }, $jsFiles);
+            usort($scriptAssets, function ($a, $b) {
+                $rank = function ($f) {
+                    if (strpos($f, 'lib-react') !== false) return 0;
+                    if (strpos($f, 'index') !== false) return 2;
+                    return 1;
+                };
+                return $rank($a) <=> $rank($b);
+            });
         }
         if (!$styleAssets) {
             $styleAssets = ['/assets/admin-next/static/css/index.css'];

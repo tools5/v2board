@@ -163,7 +163,7 @@ class ConfigController extends Controller
                 'email_host' => config('v2board.email_host'),
                 'email_port' => config('v2board.email_port'),
                 'email_username' => config('v2board.email_username'),
-                'email_password' => '',
+                'email_password' => config('v2board.email_password'),
                 'email_password_configured' => $this->isSecretConfigured('email_password'),
                 'email_encryption' => config('v2board.email_encryption'),
                 'email_from_address' => config('v2board.email_from_address'),
@@ -172,7 +172,7 @@ class ConfigController extends Controller
             ],
             'telegram' => [
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
-                'telegram_bot_token' => '',
+                'telegram_bot_token' => config('v2board.telegram_bot_token'),
                 'telegram_bot_token_configured' => $this->isSecretConfigured('telegram_bot_token'),
                 'telegram_discuss_link' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.telegram_discuss_link'))
             ],
@@ -192,7 +192,7 @@ class ConfigController extends Controller
                 'email_whitelist_suffix' => config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT),
                 'email_gmail_limit_enable' => config('v2board.email_gmail_limit_enable', 0),
                 'recaptcha_enable' => (int)config('v2board.recaptcha_enable', 0),
-                'recaptcha_key' => '',
+                'recaptcha_key' => config('v2board.recaptcha_key'),
                 'recaptcha_key_configured' => $this->isSecretConfigured('recaptcha_key'),
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
                 'register_limit_by_ip_enable' => (int)config('v2board.register_limit_by_ip_enable', 0),
@@ -298,12 +298,7 @@ class ConfigController extends Controller
 
     private function secretConfigKeys(): array
     {
-        $keys = [
-            'server_token',
-            'email_password',
-            'telegram_bot_token',
-            'recaptcha_key',
-        ];
+        $keys = [];
 
         foreach (OauthProviderRegistry::all() as $meta) {
             foreach (['client_secret_key', 'bot_token_key'] as $metaKey) {

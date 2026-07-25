@@ -5,8 +5,6 @@ namespace App\Http\Controllers\V1\Admin\Server;
 use App\Http\Controllers\Controller;
 use App\Models\Plan;
 use App\Models\ServerGroup;
-use App\Models\ServerVmess;
-use App\Models\ServerVless;
 use App\Models\User;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
@@ -27,7 +25,7 @@ class GroupController extends Controller
             $serverGroups[$k]['user_count'] = User::where('group_id', $v['id'])->count();
             $serverGroups[$k]['server_count'] = 0;
             foreach ($servers as $server) {
-                if (in_array($v['id'], $server['group_id'])) {
+                if (in_array((int) $v['id'], $this->normalizeGroupIds($server['group_id'] ?? null), true)) {
                     $serverGroups[$k]['server_count'] = $serverGroups[$k]['server_count']+1;
                 }
             }
@@ -64,16 +62,10 @@ class GroupController extends Controller
             }
         }
 
-        $servers = ServerVmess::all();
+        $groupId = (int) $request->input('id');
+        $servers = (new ServerService())->getAllServers();
         foreach ($servers as $server) {
-            if (in_array($request->input('id'), $server->group_id)) {
-                abort(500, '该组已被节点所使用，无法删除');
-            }
-        }
-
-        $servers = ServerVless::all();
-        foreach ($servers as $server) {
-            if (in_array($request->input('id'), $server->group_id)) {
+            if (in_array($groupId, $this->normalizeGroupIds($server['group_id'] ?? null), true)) {
                 abort(500, '该组已被节点所使用，无法删除');
             }
         }
@@ -87,5 +79,20 @@ class GroupController extends Controller
         return response([
             'data' => $serverGroup->delete()
         ]);
+    }
+
+    private function normalizeGroupIds($groupIds): array
+    {
+        if (is_string($groupIds)) {
+            $decoded = json_decode($groupIds, true);
+            $groupIds = is_array($decoded) ? $decoded : explode(',', $groupIds);
+        } elseif (!is_array($groupIds)) {
+            $groupIds = $groupIds === null ? [] : [$groupIds];
+        }
+
+        return array_values(array_unique(array_map(
+            'intval',
+            array_filter($groupIds, static fn ($groupId) => is_numeric($groupId))
+        )));
     }
 }

@@ -87,9 +87,9 @@ class UserController extends Controller
             }
 
             if ($key === 'invite_by_email') {
-                $user = User::where('email', $condition, $value)->first();
-                $inviteUserId = isset($user->id) ? $user->id : 0;
-                $builder->where('invite_user_id', $inviteUserId);
+                $builder->whereIn('invite_user_id', User::query()
+                    ->select('id')
+                    ->where('email', $condition, $value));
                 continue;
             }
 

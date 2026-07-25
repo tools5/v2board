@@ -14,14 +14,16 @@ class OrderUpdate extends FormRequest
     public function rules()
     {
         return [
-            'status' => 'in:0,1,2,3',
-            'commission_status' => 'in:0,1,3'
+            'trade_no' => 'required|string',
+            'status' => 'nullable|in:0,1,2,3',
+            'commission_status' => 'nullable|in:0,1,3'
         ];
     }
 
     public function messages()
     {
         return [
+            'trade_no.required' => '订单号不能为空',
             'status.in' => '销售状态格式不正确',
             'commission_status.in' => '佣金状态格式不正确'
         ];

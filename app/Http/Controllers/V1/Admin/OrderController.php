@@ -23,9 +23,13 @@ class OrderController extends Controller
         if ($request->input('filter')) {
             foreach ($request->input('filter') as $filter) {
                 if ($filter['key'] === 'email') {
-                    $user = User::where('email', "%{$filter['value']}%")->first();
-                    if (!$user) continue;
-                    $builder->where('user_id', $user->id);
+                    $condition = $filter['condition'] === '模糊' ? 'like' : $filter['condition'];
+                    $value = $filter['condition'] === '模糊'
+                        ? "%{$filter['value']}%"
+                        : $filter['value'];
+                    $builder->whereIn('user_id', User::query()
+                        ->select('id')
+                        ->where('email', $condition, $value));
                     continue;
                 }
                 if ($filter['condition'] === '模糊') {
@@ -117,6 +121,7 @@ class OrderController extends Controller
     public function update(OrderUpdate $request)
     {
         $params = $request->only([
+            'status',
             'commission_status'
         ]);
 

@@ -134,7 +134,7 @@ class InfrastructureSecurityTest extends TestCase
         $this->assertFalse($method->invoke($controller, $bodyOnly));
     }
 
-    public function testConfigFetchExposesServerTokenButKeepsOtherSecretsMasked(): void
+    public function testConfigFetchExposesSystemSecretsForAdminConfiguration(): void
     {
         config([
             'v2board.server_token' => 'server-secret-value',
@@ -150,11 +150,11 @@ class InfrastructureSecurityTest extends TestCase
 
         $this->assertSame('server-secret-value', $data['server']['server_token']);
         $this->assertTrue($data['server']['server_token_configured']);
-        $this->assertSame('', $data['email']['email_password']);
+        $this->assertSame('mail-secret-value', $data['email']['email_password']);
         $this->assertTrue($data['email']['email_password_configured']);
-        $this->assertSame('', $data['telegram']['telegram_bot_token']);
+        $this->assertSame('telegram-secret-value', $data['telegram']['telegram_bot_token']);
         $this->assertTrue($data['telegram']['telegram_bot_token_configured']);
-        $this->assertSame('', $data['safe']['recaptcha_key']);
+        $this->assertSame('recaptcha-secret-value', $data['safe']['recaptcha_key']);
         $this->assertTrue($data['safe']['recaptcha_key_configured']);
 
         $method = new \ReflectionMethod($controller, 'preserveExistingSecrets');
@@ -164,8 +164,8 @@ class InfrastructureSecurityTest extends TestCase
             'email_password' => null,
             'login_linuxdo_client_secret' => '',
         ]);
-        $this->assertSame('server-secret-value', $changes['server_token']);
-        $this->assertSame('mail-secret-value', $changes['email_password']);
+        $this->assertSame('', $changes['server_token']);
+        $this->assertNull($changes['email_password']);
         $this->assertSame('oauth-secret-value', $changes['login_linuxdo_client_secret']);
     }
 

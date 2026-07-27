@@ -281,13 +281,19 @@ class StatisticalService {
             ->get();
 
         // 排行榜要显示节点名字而不是 #id（getServerLastRank 同款做法）；
-        // 已删除的节点找不到名字时留 null，前端回退显示 #id
+        // 已删除的节点找不到名字时留 null，前端回退显示 #id。
+        // 同时带上内层协议（anytls/tuic/...）：v2node 这种容器类型对管理员没信息量
         $names = [];
+        $protocols = [];
         foreach ((new ServerService())->getAllServers() as $server) {
-            $names[$server['type'] . '-' . $server['id']] = $server['name'];
+            $key = $server['type'] . '-' . $server['id'];
+            $names[$key] = $server['name'];
+            $protocols[$key] = $server['protocol'] ?? null;
         }
         foreach ($stats as $stat) {
-            $stat->server_name = $names[$stat->server_type . '-' . $stat->server_id] ?? null;
+            $key = $stat->server_type . '-' . $stat->server_id;
+            $stat->server_name = $names[$key] ?? null;
+            $stat->server_protocol = $protocols[$key] ?? null;
         }
 
         return $stats;

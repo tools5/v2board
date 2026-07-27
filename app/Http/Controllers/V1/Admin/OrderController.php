@@ -71,7 +71,11 @@ class OrderController extends Controller
         $res = $orderModel->forPage($current, $pageSize)
             ->get();
         $plan = Plan::get();
+        // 一次性取本页订单涉及的用户邮箱，避免 N 次查询；仪表盘「最近订单」和列表都要显示
+        $userEmails = User::whereIn('id', collect($res)->pluck('user_id')->unique()->filter())
+            ->pluck('email', 'id');
         for ($i = 0; $i < count($res); $i++) {
+            $res[$i]['user_email'] = $userEmails[$res[$i]['user_id']] ?? null;
             for ($k = 0; $k < count($plan); $k++) {
                 if ($plan[$k]['id'] == $res[$i]['plan_id']) {
                     $res[$i]['plan_name'] = $plan[$k]['name'];

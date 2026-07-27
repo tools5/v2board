@@ -55,6 +55,22 @@ class UserController extends Controller
         ]);
     }
 
+    public function removeOtherSessions(Request $request)
+    {
+        $user = User::find($request->user['id']);
+        if (!$user) {
+            abort(500, __('The user does not exist'));
+        }
+        $currentSessionId = AuthService::currentSessionId($request);
+        if (!$currentSessionId) {
+            abort(400, __('Token error'));
+        }
+        $authService = new AuthService($user);
+        return response([
+            'data' => $authService->removeOtherSessions($currentSessionId)
+        ]);
+    }
+
     public function checkLogin(Request $request)
     {
         $data = [
@@ -647,6 +663,8 @@ class UserController extends Controller
         $order->period = 'deposit';
         $order->trade_no = Helper::generateOrderNo();
         $order->total_amount = $request->input('transfer_amount');
+        $order->created_ip = Helper::getRealClientIp($request);
+        $order->created_user_agent = mb_substr((string) $request->userAgent(), 0, 512);
 
         $orderService->setOrderType($user);
         $orderService->setInvite($user);

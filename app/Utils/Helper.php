@@ -863,4 +863,66 @@ class Helper
         $config['mode'] = $settings['mode'] ?? 'auto';
         $config['extra'] = isset($settings['extra']) ? json_encode($settings['extra'], JSON_UNESCAPED_SLASHES) : null;
     }
+
+    /**
+     * IP 归属地（中文），形如「日本 东京都 东京 · Amazon.com」。
+     *
+     * 惰性使用：只有后台打开订单详情时才查，天然低频，ip-api.com 免费额度
+     * （45 次/分）绰绰有余。结果缓存 7 天；失败缓存 10 分钟避免连环慢请求。
+     * 注意 ip-api.com 免费版只支持 http，不要改成 https（会 403）。
+     */
+    public static function ipLocation(?string $ip): ?string
+    {
+        if (!$ip || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            return null;
+        }
+        // 内网/保留地址没有归属地可查
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return '内网地址';
+        }
+
+        $cacheKey = 'IP_LOCATION_' . md5($ip);
+        $cached = Cache::get($cacheKey);
+        if ($cached !== null) {
+            return $cached === '' ? null : $cached;
+        }
+
+        $location = null;
+        try {
+            $client = new \GuzzleHttp\Client([
+                'connect_timeout' => 2,
+                'timeout' => 3,
+                'http_errors' => false,
+                'allow_redirects' => false,
+            ]);
+            $response = $client->get('http://ip-api.com/json/' . rawurlencode($ip), [
+                'query' => [
+                    'lang' => 'zh-CN',
+                    'fields' => 'status,country,regionName,city,isp',
+                ],
+            ]);
+            if ($response->getStatusCode() === 200) {
+                $payload = json_decode((string)$response->getBody(), true);
+                if (is_array($payload) && ($payload['status'] ?? '') === 'success') {
+                    $parts = array_filter([
+                        $payload['country'] ?? null,
+                        $payload['regionName'] ?? null,
+                        $payload['city'] ?? null,
+                    ], fn ($v) => is_string($v) && $v !== '');
+                    // 省市同名（直辖市）去重
+                    $parts = array_values(array_unique($parts));
+                    $location = implode(' ', $parts);
+                    if (!empty($payload['isp']) && is_string($payload['isp'])) {
+                        $location .= ' · ' . $payload['isp'];
+                    }
+                    $location = $location !== '' ? $location : null;
+                }
+            }
+        } catch (\Throwable $e) {
+            // 查询失败不影响详情展示
+        }
+
+        Cache::put($cacheKey, $location ?? '', $location !== null ? 604800 : 600);
+        return $location;
+    }
 }

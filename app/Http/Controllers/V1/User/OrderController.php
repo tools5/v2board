@@ -99,6 +99,8 @@ class OrderController extends Controller
                 $order->period = 'deposit';
                 $order->trade_no = Helper::generateOrderNo();
                 $order->total_amount = $amount;
+                $order->created_ip = Helper::getRealClientIp($request);
+                $order->created_user_agent = mb_substr((string) $request->userAgent(), 0, 512);
 
                 $orderService->setOrderType($user);
                 $orderService->setInvite($user);
@@ -162,6 +164,8 @@ class OrderController extends Controller
             $order->period = $request->input('period');
             $order->trade_no = Helper::generateOrderNo();
             $order->total_amount = $plan[$request->input('period')];
+            $order->created_ip = Helper::getRealClientIp($request);
+            $order->created_user_agent = mb_substr((string) $request->userAgent(), 0, 512);
 
             if ($request->input('coupon_code')) {
                 $couponService = new CouponService($request->input('coupon_code'));

@@ -165,6 +165,8 @@ CREATE TABLE `v2_order` (
                             `period` varchar(255) NOT NULL,
                             `trade_no` varchar(36) NOT NULL,
                             `callback_no` varchar(255) DEFAULT NULL,
+                            `created_ip` varchar(45) DEFAULT NULL COMMENT '下单IP',
+                            `created_user_agent` varchar(512) DEFAULT NULL COMMENT '下单User-Agent',
                             `total_amount` int(11) NOT NULL,
                             `handling_amount` int(11) DEFAULT NULL,
                             `discount_amount` int(11) DEFAULT NULL,

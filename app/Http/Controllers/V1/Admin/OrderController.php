@@ -49,6 +49,8 @@ class OrderController extends Controller
         if ($order->surplus_order_ids) {
             $order['surplus_orders'] = Order::whereIn('id', $order->surplus_order_ids)->get();
         }
+        // 下单 IP 的归属地：不落库，打开详情时实时查（带缓存），IP 库老化也不影响历史数据
+        $order['created_ip_location'] = \App\Utils\Helper::ipLocation($order->created_ip);
         return response([
             'data' => $order
         ]);

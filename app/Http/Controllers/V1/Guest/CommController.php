@@ -24,6 +24,10 @@ class CommController extends Controller
                     : 0,
                 'is_recaptcha' => (int)config('v2board.recaptcha_enable', 0) ? 1 : 0,
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
+                // Cap 自托管验证码：前端 widget 需要 endpoint + site_key（secret 绝不下发前台）
+                'is_cap' => (int)config('v2board.cap_enable', 0) ? 1 : 0,
+                'cap_site_key' => config('v2board.cap_site_key'),
+                'cap_endpoint' => config('v2board.cap_endpoint'),
                 'app_description' => config('v2board.app_description'),
                 'app_url' => ConfiguredUrl::applicationUrl(),
                 'logo' => ConfiguredUrl::normalizeExternalHttpUrl(config('v2board.logo')),

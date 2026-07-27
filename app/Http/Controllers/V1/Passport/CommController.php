@@ -39,6 +39,10 @@ class CommController extends Controller
                 abort(500, __('Invalid code is incorrect'));
             }
         }
+        // Cap（自托管验证码）校验，与 reCAPTCHA 独立开关
+        if (!Helper::verifyCap($request->input('cap_data'))) {
+            abort(500, __('Invalid code is incorrect'));
+        }
         $isforget = $request->input('isforget');
         $email_exists = User::where('email', $email)->exists();
         //检查是否在白名单内

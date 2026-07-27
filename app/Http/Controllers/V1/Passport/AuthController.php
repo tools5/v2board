@@ -49,6 +49,10 @@ class AuthController extends Controller
                 abort(500, __('Invalid code is incorrect'));
             }
         }
+        // Cap（自托管验证码）校验，与 reCAPTCHA 独立开关，可单开或并用
+        if (!Helper::verifyCap($request->input('cap_data'))) {
+            abort(500, __('Invalid code is incorrect'));
+        }
         if ((int)config('v2board.email_whitelist_enable', 0)) {
             if (!Helper::emailSuffixVerify(
                 $request->input('email'),
@@ -149,6 +153,10 @@ class AuthController extends Controller
             if (!$recaptchaResp->isSuccess()) {
                 abort(500, __('Invalid code is incorrect'));
             }
+        }
+        // Cap（自托管验证码）校验，与 reCAPTCHA 独立开关，可单开或并用
+        if (!Helper::verifyCap($request->input('cap_data'))) {
+            abort(500, __('Invalid code is incorrect'));
         }
 
         $email = (string)$request->input('email');
@@ -572,6 +580,10 @@ class AuthController extends Controller
             if (!$recaptchaResp->isSuccess()) {
                 abort(500, __('Invalid code is incorrect'));
             }
+        }
+        // Cap（自托管验证码）校验，与 reCAPTCHA 独立开关，可单开或并用
+        if (!Helper::verifyCap($request->input('cap_data'))) {
+            abort(500, __('Invalid code is incorrect'));
         }
 
         $email = (string)$request->input('email');

@@ -111,6 +111,11 @@ class ConfigSave extends FormRequest
         'recaptcha_enable' => 'in:0,1',
         'recaptcha_key' => '',
         'recaptcha_site_key' => '',
+        // Cap 自托管验证码：endpoint=你的 Cap 服务器地址，secret 仅后端校验用
+        'cap_enable' => 'in:0,1',
+        'cap_endpoint' => 'nullable|string|max:255',
+        'cap_site_key' => 'nullable|string|max:255',
+        'cap_secret_key' => 'nullable|string|max:255',
         'email_verify' => 'in:0,1',
         'safe_mode_enable' => 'in:0,1',
         'register_limit_by_ip_enable' => 'in:0,1',

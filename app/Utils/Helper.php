@@ -925,4 +925,45 @@ class Helper
         Cache::put($cacheKey, $location ?? '', $location !== null ? 604800 : 600);
         return $location;
     }
+
+    /**
+     * 校验 Cap（自托管 PoW 验证码，capjs.js.org）token。
+     *
+     * cap_enable 关闭时直接放行；开启但配置不全或校验失败一律拦截。
+     * Cap standalone 的校验端点是 reCAPTCHA 兼容的 siteverify 风格
+     * （见其 siteverify.js 源码，无路由前缀）：
+     *   POST {endpoint}/{site_key}/siteverify   body {secret, response}
+     *   成功返回 {"success": true}
+     * 其中 response 就是前端 widget 解出的 token（形如 sitekey:xxx:xxx）。
+     */
+    public static function verifyCap($token): bool
+    {
+        if (!(int)config('v2board.cap_enable', 0)) {
+            return true;
+        }
+        $endpoint = rtrim((string)config('v2board.cap_endpoint', ''), '/');
+        $siteKey = (string)config('v2board.cap_site_key', '');
+        $secret = (string)config('v2board.cap_secret_key', '');
+        $response = is_string($token) ? $token : '';
+        if ($endpoint === '' || $siteKey === '' || $secret === '' || $response === '') {
+            return false;
+        }
+        try {
+            $client = new \GuzzleHttp\Client([
+                'connect_timeout' => 3,
+                'timeout' => 5,
+                'http_errors' => false,
+            ]);
+            $resp = $client->post("{$endpoint}/{$siteKey}/siteverify", [
+                'json' => ['secret' => $secret, 'response' => $response],
+            ]);
+            if ($resp->getStatusCode() !== 200) {
+                return false;
+            }
+            $data = json_decode((string)$resp->getBody(), true);
+            return is_array($data) && ($data['success'] ?? false) === true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
 }

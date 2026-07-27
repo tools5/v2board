@@ -121,7 +121,7 @@ class AuthController extends Controller
         $authService = new AuthService($user);
 
         return response()->json([
-            'data' => $authService->generateAuthData($request)
+            'data' => $authService->generateAuthData($request, 'register')
         ]);
     }
 
@@ -274,7 +274,7 @@ class AuthController extends Controller
 
         $authService = new AuthService($user);
         return response()->json([
-            'data' => $authService->generateAuthData($request)
+            'data' => $authService->generateAuthData($request, 'register')
         ]);
     }
 
@@ -456,7 +456,7 @@ class AuthController extends Controller
 
         $authService = new AuthService($user);
         return response([
-            'data' => $authService->generateAuthData($request)
+            'data' => $authService->generateAuthData($request, 'password')
         ]);
     }
 
@@ -486,7 +486,7 @@ class AuthController extends Controller
             Cache::forget($key);
             $authService = new AuthService($user);
             return response([
-                'data' => $authService->generateAuthData($request)
+                'data' => $authService->generateAuthData($request, 'token')
             ]);
         }
 

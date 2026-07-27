@@ -22,7 +22,7 @@ class AuthService
         $this->user = $user;
     }
 
-    public function generateAuthData(Request $request)
+    public function generateAuthData(Request $request, $loginMethod = null)
     {
         $now = time();
         $expiresAt = $now + self::tokenTtl();
@@ -39,6 +39,8 @@ class AuthService
         self::addSession($this->user->id, $guid, [
             'ip' => Helper::getRealClientIp($request),
             'login_at' => $now,
+            'last_seen' => $now,
+            'login_method' => is_string($loginMethod) && $loginMethod !== '' ? $loginMethod : null,
             'ua' => $request->userAgent(),
             'expires_at' => $expiresAt,
             'token_hash' => self::tokenHash($authData),
@@ -115,6 +117,8 @@ class AuthService
                 Cache::forget($userCacheKey);
                 return false;
             }
+
+            self::touchSession($userId, $sessionId);
 
             $user = Cache::get($userCacheKey);
             if (!is_array($user)) {
@@ -232,6 +236,48 @@ class AuthService
         unset($sessions[$sessionId]);
 
         return self::storeSessions($cacheKey, self::activeSessions($sessions));
+    }
+
+    public function removeOtherSessions($exceptSessionId)
+    {
+        $cacheKey = CacheKey::get('USER_SESSIONS', $this->user->id);
+        $sessions = (array)Cache::get($cacheKey, []);
+        $kept = [];
+
+        foreach ($sessions as $sessionId => $meta) {
+            if (!is_array($meta)) {
+                continue;
+            }
+            if ((string)$sessionId === (string)$exceptSessionId) {
+                $kept[$sessionId] = $meta;
+                continue;
+            }
+            self::forgetSessionUserCache($meta);
+        }
+
+        return self::storeSessions($cacheKey, self::activeSessions($kept));
+    }
+
+    /**
+     * Refresh the session's last_seen marker, throttled to one cache write
+     * per minute so hot request paths stay cheap.
+     */
+    private static function touchSession($userId, $sessionId)
+    {
+        $cacheKey = CacheKey::get('USER_SESSIONS', $userId);
+        $sessions = (array)Cache::get($cacheKey, []);
+        if (!isset($sessions[$sessionId]) || !is_array($sessions[$sessionId])) {
+            return;
+        }
+
+        $now = time();
+        $lastSeen = (int)($sessions[$sessionId]['last_seen'] ?? 0);
+        if ($lastSeen > 0 && $now - $lastSeen < 60) {
+            return;
+        }
+
+        $sessions[$sessionId]['last_seen'] = $now;
+        self::storeSessions($cacheKey, $sessions);
     }
 
     public function removeAllSession()

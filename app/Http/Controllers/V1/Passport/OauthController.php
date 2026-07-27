@@ -72,7 +72,7 @@ class OauthController extends Controller
         }
 
         $user = $result['user'];
-        $authData = $result['auth'] ?? (new AuthService($user))->generateAuthData($request);
+        $authData = $result['auth'] ?? (new AuthService($user))->generateAuthData($request, 'oauth:' . strtolower((string)$provider));
 
         if ($isPopup) {
             // 弹窗登录需回传完整凭证，主题侧用 token + auth_data 完成会话
@@ -120,7 +120,7 @@ class OauthController extends Controller
         }
 
         $user = $result['user'];
-        $auth = $result['auth'] ?? (new AuthService($user))->generateAuthData($request);
+        $auth = $result['auth'] ?? (new AuthService($user))->generateAuthData($request, 'oauth:telegram');
 
         return response([
             'data' => array_merge($auth, [

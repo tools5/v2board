@@ -49,9 +49,14 @@ class UserController extends Controller
         if (!$user) {
             abort(500, __('The user does not exist'));
         }
+        // session_id 会被当作数组 key 用；传数组会触发 Illegal offset type，先挡掉
+        $sessionId = $request->input('session_id');
+        if (!is_string($sessionId) || $sessionId === '') {
+            abort(400, __('Invalid session'));
+        }
         $authService = new AuthService($user);
         return response([
-            'data' => $authService->removeSession($request->input('session_id'))
+            'data' => $authService->removeSession($sessionId)
         ]);
     }
 

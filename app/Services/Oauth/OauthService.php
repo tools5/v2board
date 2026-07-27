@@ -170,7 +170,7 @@ class OauthService
             'mode' => 'login',
             'user' => $user,
             'is_new' => $this->lastUserWasCreated,
-            'auth' => (new AuthService($user))->generateAuthData($request),
+            'auth' => (new AuthService($user))->generateAuthData($request, 'oauth:' . strtolower((string)$provider)),
             'popup' => !empty($stateData['popup']),
         ];
     }
@@ -240,7 +240,7 @@ class OauthService
             'is_new' => $this->lastUserWasCreated,
         ];
         if ($request) {
-            $result['auth'] = (new AuthService($user))->generateAuthData($request);
+            $result['auth'] = (new AuthService($user))->generateAuthData($request, 'oauth:telegram');
         }
         return $result;
     }

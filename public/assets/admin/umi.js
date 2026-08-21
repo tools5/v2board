@@ -98610,7 +98610,31 @@
                     span: 6
                 }, "\u66f4\u65b0\u65f6\u95f4"), g.a.createElement(S["a"], {
                     span: 18
-                }, w()(1e3 * this.state.order.updated_at).format("YYYY-MM-DD HH:mm:ss"))), this.state.order.invite_user_id && 3 === this.state.order.status ? g.a.createElement("div", null, g.a.createElement(_["a"], null), g.a.createElement(E["a"], {
+                }, w()(1e3 * this.state.order.updated_at).format("YYYY-MM-DD HH:mm:ss"))), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u4e0b\u5355IP"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.created_ip || "-")), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u5730\u533a"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.created_ip_location || "-")), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u5ba2\u6237\u7aef"), g.a.createElement(S["a"], {
+                    span: 18,
+                    style: {
+                        wordBreak: "break-all"
+                    }
+                }, this.state.order.created_user_agent || "-")), this.state.order.invite_user_id && 3 === this.state.order.status ? g.a.createElement("div", null, g.a.createElement(_["a"], null), g.a.createElement(E["a"], {
                     gutter: [16, 16],
                     style: n
                 }, g.a.createElement(S["a"], {
@@ -98855,6 +98879,17 @@
                         }, "\u6807\u8bb0\u4e3a ", g.a.createElement(d["a"], {
                             type: "caret-down"
                         })))))
+                    }
+                }, {
+                    title: "\u4e0b\u5355IP",
+                    dataIndex: "created_ip",
+                    key: "created_ip",
+                    render: e=>{
+                        return g.a.createElement("span", {
+                            style: {
+                                whiteSpace: "nowrap"
+                            }
+                        }, e || "-")
                     }
                 }, {
                     title: "\u521b\u5efa\u65f6\u95f4",

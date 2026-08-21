@@ -211,6 +211,24 @@ class ConfigController extends Controller
                 'providers' => OauthProviderRegistry::adminProviderList(),
                 // 应用内 OAuth 深链回调 scheme 白名单（逗号分隔）
                 'oauth_app_scheme' => config('v2board.oauth_app_scheme'),
+            ],
+            // XBClient 客户端：AdMob 广告与应用内购买
+            'admob' => [
+                'payment_enabled' => (int)config('v2board.admob_payment_enabled', 0),
+                'app_open_ad_enabled' => (int)config('v2board.admob_app_open_ad_enabled', 0),
+                'app_open_ad_unit_id' => config('v2board.admob_app_open_ad_unit_id'),
+                'plan_reward_ad_enabled' => (int)config('v2board.admob_plan_reward_ad_enabled', 0),
+                'plan_rewarded_ad_unit_id' => config('v2board.admob_plan_rewarded_ad_unit_id'),
+                'plan_reward_expire_days' => (int)config('v2board.admob_plan_reward_expire_days', 0),
+                'plan_reward_transfer_gb' => (int)config('v2board.admob_plan_reward_transfer_gb', 0),
+                'plan_reward_daily_limit' => (int)config('v2board.admob_plan_reward_daily_limit', 0),
+                'points_reward_ad_enabled' => (int)config('v2board.admob_points_reward_ad_enabled', 0),
+                'points_rewarded_ad_unit_id' => config('v2board.admob_points_rewarded_ad_unit_id'),
+                'points_reward_balance' => (int)config('v2board.admob_points_reward_balance', 0),
+                'points_reward_daily_limit' => (int)config('v2board.admob_points_reward_daily_limit', 0),
+                'github_project_url' => config('v2board.xbclient_github_project_url'),
+                // 只读：填到 AdMob 控制台的 SSV 回调地址
+                'ssv_callback_url' => ConfiguredUrl::applicationPathUrl('/api/v1/admob/guest/ssv'),
             ]
         ];
         if ($key && isset($data[$key])) {

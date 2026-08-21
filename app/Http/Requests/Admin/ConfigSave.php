@@ -127,6 +127,20 @@ class ConfigSave extends FormRequest
         'password_limit_expire' => 'integer',
         // 应用内 OAuth 允许深链回调的自定义 scheme 白名单（逗号分隔，需与客户端 XBCLIENT_OAUTH_CALLBACK_SCHEME 一致）
         'oauth_app_scheme' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z][A-Za-z0-9+.\-]*([,\s]+[A-Za-z][A-Za-z0-9+.\-]*)*$/'],
+        // XBClient 客户端：AdMob 广告与应用内购买（admob_ssv_secret 自动生成，不在此列）
+        'admob_payment_enabled' => 'in:0,1',
+        'admob_app_open_ad_enabled' => 'in:0,1',
+        'admob_app_open_ad_unit_id' => 'nullable|string|max:128',
+        'admob_plan_reward_ad_enabled' => 'in:0,1',
+        'admob_plan_rewarded_ad_unit_id' => 'nullable|string|max:128',
+        'admob_plan_reward_expire_days' => 'integer|min:0',
+        'admob_plan_reward_transfer_gb' => 'integer|min:0',
+        'admob_plan_reward_daily_limit' => 'integer|min:0',
+        'admob_points_reward_ad_enabled' => 'in:0,1',
+        'admob_points_rewarded_ad_unit_id' => 'nullable|string|max:128',
+        'admob_points_reward_balance' => 'integer|min:0',
+        'admob_points_reward_daily_limit' => 'integer|min:0',
+        'xbclient_github_project_url' => 'nullable|string|max:255',
     ];
 
     public static function allRules(): array

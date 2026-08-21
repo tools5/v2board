@@ -116,6 +116,24 @@ class AdminRoute
             $router->post('/user/delUser', 'V1\\Admin\\UserController@delUser');
             $router->post('/user/allDel', 'V1\\Admin\\UserController@allDel');
             $router->post('/user/setInviteUser', 'V1\\Admin\\UserController@setInviteUser');
+            // 用户风控（审计抽屉/风险摘要/清空审计）
+            $router->get ('/user/risk', 'V1\\Admin\\UserController@subscriptionRisk');
+            $router->post('/user/subscribe-audit/clear', 'V1\\Admin\\UserController@clearSubscribeAudit');
+            $router->get ('/user/subscribe-requests', 'V1\\Admin\\UserController@subscribeRequests');
+            // 风控
+            $router->get ('/risk/rule/fetch', 'V1\\Admin\\RiskRuleController@fetch');
+            $router->post('/risk/rule/save', 'V1\\Admin\\RiskRuleController@save');
+            $router->post('/risk/rule/show', 'V1\\Admin\\RiskRuleController@show');
+            $router->post('/risk/rule/sort', 'V1\\Admin\\RiskRuleController@sort');
+            $router->post('/risk/rule/drop', 'V1\\Admin\\RiskRuleController@drop');
+            $router->post('/risk/rule/recompute', 'V1\\Admin\\RiskRuleController@recompute');
+            $router->post('/risk/rule/manual-evaluate', 'V1\\Admin\\RiskRuleController@manualEvaluate');
+            $router->get ('/risk/trace/fetch', 'V1\\Admin\\RiskTraceController@fetch');
+            $router->get ('/risk/trace/history', 'V1\\Admin\\RiskTraceController@history');
+            $router->post('/risk/trace/token/lookup', 'V1\\Admin\\RiskTraceController@lookup');   // POST：token 不入 query/日志
+            $router->post('/risk/trace/token/reveal', 'V1\\Admin\\RiskTraceController@reveal');   // POST：理由同上
+            $router->get ('/risk/shared-ip/fetch', 'V1\\Admin\\RiskSharedIpController@fetch');
+            $router->get ('/risk/shared-ip/detail', 'V1\\Admin\\RiskSharedIpController@detail');
             // OAuth 用户管理（与用户管理能力对齐，按绑定展示第三方 ID）
             $router->get ('/oauth/fetch', 'V1\\Admin\\OauthController@fetch');
             $router->get ('/oauth/getInfoById', 'V1\\Admin\\OauthController@getInfoById');

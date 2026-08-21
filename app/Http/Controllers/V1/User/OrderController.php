@@ -10,6 +10,7 @@ use App\Models\Plan;
 use App\Models\User;
 use App\Services\CouponService;
 use App\Services\OrderService;
+use App\Services\PaymentDriverPolicy;
 use App\Services\PaymentService;
 use App\Services\PlanService;
 use App\Services\UserService;
@@ -235,7 +236,9 @@ class OrderController extends Controller
 
         list($order, $payment) = DB::transaction(function () use ($request, $tradeNo, $method) {
             $payment = Payment::where('id', (int) $method)->lockForUpdate()->first();
-            if (!$payment || !(int) $payment->enable) {
+            if (!$payment
+                || !(int) $payment->enable
+                || !PaymentDriverPolicy::isDriverAvailable((string) $payment->payment)) {
                 abort(500, __('Payment method is not available'));
             }
 
@@ -312,7 +315,11 @@ class OrderController extends Controller
         ])
             ->where('enable', 1)
             ->orderBy('sort', 'ASC')
-            ->get();
+            ->get()
+            ->filter(function (Payment $payment) {
+                return PaymentDriverPolicy::isDriverAvailable((string) $payment->payment);
+            })
+            ->values();
 
         return response([
             'data' => $methods

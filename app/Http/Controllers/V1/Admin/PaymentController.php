@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\OrderService;
+use App\Services\PaymentDriverPolicy;
 use App\Services\PaymentService;
 use App\Support\ConfiguredUrl;
 use App\Utils\Helper;
@@ -19,7 +20,8 @@ class PaymentController extends Controller
         $methods = [];
         foreach (glob(base_path('app/Payments') . '/*.php') as $file) {
             $method = pathinfo($file, PATHINFO_FILENAME);
-            if (PaymentService::isMethodAvailable($method)) {
+            if (PaymentService::isMethodAvailable($method)
+                && PaymentDriverPolicy::isDriverAvailable($method)) {
                 $methods[] = $method;
             }
         }
@@ -61,6 +63,9 @@ class PaymentController extends Controller
         if (!PaymentService::isMethodAvailable($params['payment'])) {
             abort(500, '支付方式不可用或缺少依赖');
         }
+        if (empty($params['id']) && !PaymentDriverPolicy::isDriverAvailable($params['payment'])) {
+            abort(422, '该支付驱动未列入白名单，暂不可新增');
+        }
 
         $paymentService = new PaymentService($params['payment'], $params['id'] ?? null);
         return response([
@@ -75,6 +80,10 @@ class PaymentController extends Controller
             $payment = Payment::where('id', $request->input('id'))->lockForUpdate()->first();
             if (!$payment) {
                 abort(500, '支付方式不存在');
+            }
+            // 只拦启用方向：未列入白名单/被隔离的驱动不能重新启用，但允许禁用
+            if (!(int) $payment->enable && !PaymentDriverPolicy::isDriverAvailable((string) $payment->payment)) {
+                abort(422, '该支付驱动未列入白名单，不能启用');
             }
 
             $payment->enable = (int) !(int) $payment->enable;
@@ -129,6 +138,10 @@ class PaymentController extends Controller
                 if (!$payment) {
                     abort(500, '支付方式不存在');
                 }
+                if ((string) $params['payment'] !== (string) $payment->payment
+                    && !PaymentDriverPolicy::isDriverAvailable((string) $params['payment'])) {
+                    abort(422, '该支付驱动未列入白名单，不能切换到该网关');
+                }
 
                 $payment->fill($params);
                 $hasActiveOrders = Order::where('payment_id', $payment->id)
@@ -148,6 +161,9 @@ class PaymentController extends Controller
             return response(['data' => true]);
         }
 
+        if (!PaymentDriverPolicy::isDriverAvailable($params['payment'])) {
+            abort(422, '该支付驱动未列入白名单，暂不可新增');
+        }
         $params['uuid'] = Helper::randomChar(8);
         if (!Payment::create($params)) {
             abort(500, '保存失败');

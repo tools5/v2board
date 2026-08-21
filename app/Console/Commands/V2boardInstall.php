@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\User;
 use App\Support\SqlFileRunner;
 use App\Utils\Helper;
+use App\Utils\TokenRotationContext;
 use Illuminate\Console\Command;
 use Illuminate\Encryption\Encrypter;
 use Illuminate\Support\Facades\Artisan;
@@ -225,7 +226,10 @@ class V2boardInstall extends Command
         $user->token = Helper::guid();
         $user->is_admin = 1;
 
-        return $user->save();
+        // 包 using() 给 token 历史标注签发原因；捕获本身由 User::created 观察者完成。
+        return TokenRotationContext::using('install_admin', function () use ($user) {
+            return $user->save();
+        });
     }
 
     private function writeEnvironmentFile(array $data): void

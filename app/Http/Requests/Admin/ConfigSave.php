@@ -125,6 +125,13 @@ class ConfigSave extends FormRequest
         'password_limit_enable' => 'in:0,1',
         'password_limit_count' => 'integer',
         'password_limit_expire' => 'integer',
+        // 订阅审计保留天数（数组形式：rules() 会追加闭包校验 0 或 35..3650）
+        'subscribe_audit_retention_days' => ['nullable', 'integer'],
+        // IP 归属 MMDB 数据库目录（留空回落 resources/ipdb，支持绝对路径）
+        'ip_mmdb_path' => 'nullable|string|max:255',
+        // 高危支付驱动白名单（仅 BTCPay/Coinbase 可入；保存时经 PaymentDriverPolicy 求交集，MGate 永久隔离）
+        'payment_secure_driver_allowlist' => 'nullable|array',
+        'payment_secure_driver_allowlist.*' => 'string',
         // 应用内 OAuth 允许深链回调的自定义 scheme 白名单（逗号分隔，需与客户端 XBCLIENT_OAUTH_CALLBACK_SCHEME 一致）
         'oauth_app_scheme' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z][A-Za-z0-9+.\-]*([,\s]+[A-Za-z][A-Za-z0-9+.\-]*)*$/'],
         // XBClient 客户端：AdMob 广告与应用内购买（admob_ssv_secret 自动生成，不在此列）
@@ -221,6 +228,21 @@ class ConfigSave extends FormRequest
                 $fail('订阅路径无效');
             }
         });
+
+        // 保留期下限与风险周期耦合：30 天周期只在完成后评估，低于 35 天会在评估前
+        // 删证据（下限常量见 SubscribeAuditRetentionService::MIN_RETENTION_DAYS）。
+        $rules['subscribe_audit_retention_days'][] = function ($attribute, $value, $fail) {
+            if ($value === null || $value === '') {
+                return;
+            }
+            $days = (int)$value;
+            if ($days === 0) {
+                return;
+            }
+            if ($days < 35 || $days > 3650) {
+                $fail('订阅审计保留天数必须为 0（不清理）或 35 至 3650 之间');
+            }
+        };
 
         $rules['deposit_bounus'][] = function ($attribute, $value, $fail) {
             foreach ($value as $tier) {

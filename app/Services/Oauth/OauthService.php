@@ -12,6 +12,7 @@ use App\Models\UserOauth;
 use App\Services\AuthService;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
+use App\Utils\TokenRotationContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -853,7 +854,12 @@ class OauthService
             }
         }
 
-        if (!$user->save()) {
+        // 包 using() 只为给 token 历史标注签发原因（OAuth 自动注册按注册计）；
+        // 捕获本身由 User::created 观察者完成。
+        $saved = TokenRotationContext::using('register', function () use ($user) {
+            return $user->save();
+        });
+        if (!$saved) {
             abort(500, '创建用户失败');
         }
 

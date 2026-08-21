@@ -20,6 +20,7 @@ use App\Services\UserService;
 use App\Support\ConfiguredUrl;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
+use App\Utils\TokenRotationContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -618,14 +619,18 @@ class UserController extends Controller
         if (!$user) {
             abort(500, __('The user does not exist'));
         }
-        $user->uuid = Helper::guid(true);
-        $user->token = Helper::guid();
-        if (!$user->save()) {
-            abort(500, __('Reset failed'));
-        }
-        return response([
-            'data' => Helper::getSubscribeUrl($user['token'])
-        ]);
+        // 包 using() 只为给 token 历史标注原因与操作者；捕获本身由 Eloquent 观察者完成，
+        // 漏包只会让 issued_reason 退化成 unknown，不会丢记录。
+        return TokenRotationContext::using('self_reset', function () use ($user) {
+            $user->uuid = Helper::guid(true);
+            $user->token = Helper::guid();
+            if (!$user->save()) {
+                abort(500, __('Reset failed'));
+            }
+            return response([
+                'data' => Helper::getSubscribeUrl($user['token'])
+            ]);
+        });
     }
 
     public function update(UserUpdate $request)

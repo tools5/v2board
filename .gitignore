@@ -34,4 +34,6 @@ workerman.webman.php.pid
 workerman.log
 # admin-next 前端构建产物含 AGPL(new-api) 衍生代码，禁入公开仓库，走 scp 部署
 /public/assets/admin-next
+# IP 归属地 MMDB 数据库体积大（~111MB），不入库；部署时放到 resources/ipdb/
+/resources/ipdb/*.mmdb
 /storage/claude_backup_*

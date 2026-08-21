@@ -3,7 +3,11 @@
 namespace App\Http\Controllers\V1\Guest;
 
 use App\Http\Controllers\Controller;
+use App\Models\Coupon;
 use App\Models\Order;
+use App\Models\Payment;
+use App\Models\Plan;
+use App\Models\User;
 use App\Services\OrderService;
 use App\Services\PaymentService;
 use App\Services\TelegramService;
@@ -115,13 +119,7 @@ class PaymentController extends Controller
 
         if ($orderService->wasPaymentRecorded()) {
             try {
-                $telegramService = new TelegramService();
-                $message = sprintf(
-                    "💰成功收款%s元\n———————————————\n订单号：%s",
-                    $orderService->order->total_amount / 100,
-                    $orderService->order->trade_no
-                );
-                $telegramService->sendMessageWithAdmin($message);
+                $this->sendPaymentReceiptNotification($orderService->order);
             } catch (\Throwable $e) {
                 Log::warning('Payment received notification failed', [
                     'trade_no' => $tradeNo,
@@ -133,6 +131,57 @@ class PaymentController extends Controller
         return true;
     }
 
+    private function sendPaymentReceiptNotification(Order $order): void
+    {
+        $user = User::find($order->user_id);
+        $payment = $order->payment_id ? Payment::find($order->payment_id) : null;
+        $plan = $order->plan_id ? Plan::find($order->plan_id) : null;
+        $coupon = $order->coupon_id ? Coupon::find($order->coupon_id) : null;
+        $inviter = $order->invite_user_id ? User::find($order->invite_user_id) : null;
+        $todayIncome = Order::whereNotNull('paid_at')
+            ->where('paid_at', '>=', strtotime('today'))
+            ->sum('total_amount');
+        $siteUrl = (string) config('v2board.app_url', '');
+        $siteHost = parse_url($siteUrl, PHP_URL_HOST) ?: $siteUrl;
+
+        // 默认按纯文本发送（parseMode 非 markdown），值不做 markdown 转义
+        $message = sprintf(
+            "💰 成功收款 %s 元\n———————————————\n🌐 支付接口：%s\n🏦 支付渠道：%s\n📧 用户邮箱：%s\n📦 购买套餐：%s\n📅 套餐周期：%s\n🎫 优  惠  券：%s\n👥 邀  请  人：%s\n🆔 订  单  号：%s\n🌐 来源网址：%s\n📅 注册日期：%s\n📍 下单 IP：%s\n———————————————\n💵 今日总收入：%s 元",
+            number_format($order->total_amount / 100, 2, '.', ''),
+            $payment->name ?? '未知',
+            $payment->payment ?? '未知',
+            $user->email ?? '未知',
+            $plan->name ?? ($order->plan_id ? '套餐已删除' : '余额充值'),
+            $this->periodLabel((string) $order->period),
+            $coupon->code ?? '无',
+            $inviter->email ?? '无',
+            $order->trade_no,
+            $siteHost ?: '未配置',
+            $user ? date('Y-m-d H:i:s', (int) $user->created_at) : '未知',
+            $order->created_ip ?: '暂无记录',
+            number_format($todayIncome / 100, 2, '.', '')
+        );
+
+        (new TelegramService())->sendMessageWithAdmin($message);
+    }
+
+    private function periodLabel(string $period): string
+    {
+        $labels = [
+            'month_price' => '月付',
+            'quarter_price' => '季付',
+            'half_year_price' => '半年付',
+            'year_price' => '年付',
+            'two_year_price' => '两年付',
+            'three_year_price' => '三年付',
+            'onetime_price' => '一次性',
+            'reset_price' => '流量重置包',
+            'deposit' => '余额充值',
+        ];
+
+        return $labels[$period] ?? $period;
+    }
+
     private function isValidCallbackContentType(?string $contentType): bool
     {
         if ($contentType === null || $contentType === '' || strlen($contentType) > 200) {
@@ -140,11 +189,7 @@ class PaymentController extends Controller
         }
 
         return preg_match(
-            '/\A[A-Za-z0-9!#    private function callbackString($value, bool $trim = true): ?string
-^_.+-]+\/[A-Za-z0-9!#    private function callbackString($value, bool $trim = true): ?string
-^_.+-]+(?:\s*;\s*[A-Za-z0-9!#    private function callbackString($value, bool $trim = true): ?string
-^_.+-]+\s*=\s*(?:\"[^\"\r\n]*\"|[A-Za-z0-9!#    private function callbackString($value, bool $trim = true): ?string
-^_.+-]+))*\z/',
+            '/\A[A-Za-z0-9!#$%&\'*+^_.+-]+\/[A-Za-z0-9!#$%&\'*+^_.+-]+(?:\s*;\s*[A-Za-z0-9!#$%&\'*+^_.+-]+\s*=\s*(?:\"[^\"\r\n]*\"|[A-Za-z0-9!#$%&\'*+^_.+-]+))*\z/',
             $contentType
         ) === 1;
     }

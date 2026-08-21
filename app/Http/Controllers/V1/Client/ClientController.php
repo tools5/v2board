@@ -8,6 +8,7 @@ use App\Protocols\Singbox\Singbox;
 use App\Protocols\Singbox\SingboxOld;
 use App\Protocols\ClashMeta;
 use App\Services\ServerService;
+use App\Services\SubscribeAuditService;
 use App\Services\UserService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -23,6 +24,8 @@ class ClientController extends Controller
         // account not expired and is not banned.
         $userService = new UserService();
         if ($userService->isAvailable($user)) {
+            // 订阅拉取审计：一行落库（IP/UA/时间），失败静默，绝不影响订阅下发。
+            (new SubscribeAuditService())->record($request, $user);
             $serverService = new ServerService();
             $servers = $serverService->getAvailableServers($user);
             if ($flag !== '') {

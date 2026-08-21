@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ConfigSave;
 use App\Jobs\SendEmailJob;
 use App\Services\Oauth\OauthProviderRegistry;
+use App\Services\PaymentDriverPolicy;
+use App\Services\SubscribeAuditRetentionService;
 use App\Services\TelegramService;
 use App\Support\AtomicConfigWriter;
 use App\Support\ConfiguredUrl;
@@ -204,7 +206,16 @@ class ConfigController extends Controller
                 'register_limit_expire' => config('v2board.register_limit_expire', 60),
                 'password_limit_enable' => (int)config('v2board.password_limit_enable', 1),
                 'password_limit_count' => config('v2board.password_limit_count', 5),
-                'password_limit_expire' => config('v2board.password_limit_expire', 60)
+                'password_limit_expire' => config('v2board.password_limit_expire', 60),
+                // 订阅审计保留天数（0=不清理；默认 180，下限 35 与 30 天风险周期耦合）
+                'subscribe_audit_retention_days' => (int)config(
+                    'v2board.subscribe_audit_retention_days',
+                    SubscribeAuditRetentionService::DEFAULT_RETENTION_DAYS
+                ),
+                // IP 归属 MMDB 数据库目录（留空回落 resources/ipdb）
+                'ip_mmdb_path' => config('v2board.ip_mmdb_path'),
+                // 高危支付驱动白名单（BTCPay/Coinbase 须显式放行；MGate 永久隔离）
+                'payment_secure_driver_allowlist' => array_values((array)config('v2board.payment_secure_driver_allowlist', []))
             ],
             // 登录设置：统一管理第三方登录（可继续扩展 GitHub / Google 等）
             'login' => [
@@ -247,6 +258,12 @@ class ConfigController extends Controller
     public function save(ConfigSave $request)
     {
         $data = $request->validated();
+        // 高危支付驱动白名单收敛：只保留可解除隔离的驱动，MGate 永远进不来
+        if (array_key_exists('payment_secure_driver_allowlist', $data)) {
+            $data['payment_secure_driver_allowlist'] = PaymentDriverPolicy::sanitizeAllowlist(
+                $data['payment_secure_driver_allowlist']
+            );
+        }
         $changes = [];
         foreach (ConfigSave::allRules() as $k => $v) {
             if (array_key_exists($k, $data)) {

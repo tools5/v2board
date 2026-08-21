@@ -46,7 +46,11 @@ class CacheKey
         'PASSWORD_ERROR_LIMIT' => '密码错误次数限制',
         'USER_SESSIONS' => '用户session',
         'FORGET_REQUEST_LIMIT' => '找回密码次数限制',
-        'OAUTH_STATE' => '第三方登录状态'
+        'OAUTH_STATE' => '第三方登录状态',
+        'RISK_RECOMPUTE_CURSOR' => '风险重算游标',
+        'RISK_MANUAL_LOCK' => '风险手动评估锁',
+        'RISK_MANUAL_CURSOR' => '风险手动评估游标',
+        'TOKEN_HISTORY_STARTED_AT' => 'Token 历史起始时间'
     ];
 
     public static function get(string $key, $uniqueValue)

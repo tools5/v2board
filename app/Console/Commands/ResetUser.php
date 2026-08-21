@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Plan;
 use App\Utils\Helper;
+use App\Utils\TokenRotationContext;
 use Illuminate\Console\Command;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -47,12 +48,15 @@ class ResetUser extends Command
         }
         ini_set('memory_limit', -1);
         $users = User::all();
-        foreach ($users as $user)
-        {
-            $user->token = Helper::guid();
-            $user->uuid = Helper::guid(true);
-            $user->save();
-            $this->info("已重置用户{$user->email}的安全信息");
-        }
+        // 包 using() 给 token 历史标注批量重置原因；捕获本身由 Eloquent 观察者完成。
+        TokenRotationContext::using('cli_reset_all', function () use ($users) {
+            foreach ($users as $user)
+            {
+                $user->token = Helper::guid();
+                $user->uuid = Helper::guid(true);
+                $user->save();
+                $this->info("已重置用户{$user->email}的安全信息");
+            }
+        });
     }
 }

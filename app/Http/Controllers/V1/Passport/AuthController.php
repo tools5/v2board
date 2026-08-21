@@ -20,6 +20,7 @@ use App\Support\ConfiguredUrl;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
+use App\Utils\TokenRotationContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
@@ -414,7 +415,11 @@ class AuthController extends Controller
             }
         }
 
-        if (!$user->save()) {
+        // 包 using() 只为给 token 历史标注签发原因；捕获本身由 User::created 观察者完成。
+        $saved = TokenRotationContext::using('register', function () use ($user) {
+            return $user->save();
+        });
+        if (!$saved) {
             abort(500, __('Register failed'));
         }
 

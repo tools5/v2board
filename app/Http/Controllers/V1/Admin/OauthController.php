@@ -19,6 +19,7 @@ use App\Support\ConfiguredUrl;
 use App\Services\Oauth\OauthProviderRegistry;
 use App\Services\Oauth\OauthService;
 use App\Utils\Helper;
+use App\Utils\TokenRotationContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -379,11 +380,14 @@ class OauthController extends Controller
     public function resetSecret(Request $request)
     {
         $user = $this->findBoundSystemUser($request);
-        $user->token = Helper::guid();
-        $user->uuid = Helper::guid(true);
-        return response([
-            'data' => $user->save(),
-        ]);
+        // 包 using() 只为给 token 历史标注原因与操作者；捕获本身由 Eloquent 观察者完成。
+        return TokenRotationContext::using('admin_reset', function () use ($user) {
+            $user->token = Helper::guid();
+            $user->uuid = Helper::guid(true);
+            return response([
+                'data' => $user->save(),
+            ]);
+        });
     }
 
     public function ban(Request $request)

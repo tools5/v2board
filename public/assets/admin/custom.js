@@ -291,3 +291,83 @@
   if (document.body) buildPanel();
   else document.addEventListener('DOMContentLoaded', buildPanel);
 })();
+
+/* =============================================================================
+   侧栏滚动位置保持
+   - 滚动容器：#sidebar .content-side（.content-side-full 高度受限
+     height:calc(100% - 70px)，且 .content-side 有 overflow-x:hidden，
+     按 CSS 规范 overflow-y 计算值变为 auto —— 它才是真正滚动的元素）
+   - 复位原因：侧栏菜单 li 的 React key 用的是 Math.random()，路由切换引发
+     重渲染时全部 li 被卸载重建，容器 scrollHeight 瞬间塌缩，浏览器把
+     scrollTop 钳到 0，新节点挂载后停在顶部
+   - 方案：捕获阶段代理监听滚动记录位置（容器被重建也不丢监听）；点击侧栏时
+     先行快照；MutationObserver 观察 #sidebar 子树节点增删，重建后用 rAF 恢复
+     scrollTop；恢复窗口内忽略钳位产生的 scroll 事件（防抖 + 防覆盖）。
+     只作用于侧栏，内容区正常的“切页回顶”不受影响
+   ============================================================================= */
+(function () {
+  'use strict';
+
+  var saved = 0;       // 最近一次用户滚动位置
+  var guardUntil = 0;  // 在此时刻前忽略 scroll 事件对 saved 的更新（钳位/程序性恢复）
+  var pending = false; // 同一帧多批 DOM 变更只恢复一次
+
+  function scroller() {
+    var sb = document.getElementById('sidebar');
+    return sb ? sb.querySelector('.content-side') : null;
+  }
+
+  // 捕获阶段代理监听：scroll 不冒泡但会经过捕获阶段，容器重建无需重新绑定
+  document.addEventListener('scroll', function (e) {
+    if (Date.now() < guardUntil) return;
+    var sc = scroller();
+    if (sc && e.target === sc) saved = sc.scrollTop;
+  }, true);
+
+  // 点击侧栏（含菜单项）时先行快照，杜绝「钳位 scroll 事件先于观察者回调」的竞态
+  document.addEventListener('mousedown', function (e) {
+    var sb = document.getElementById('sidebar');
+    if (!sb || !e.target || e.target.nodeType !== 1 || !sb.contains(e.target)) return;
+    var sc = scroller();
+    if (sc) saved = sc.scrollTop;
+  }, true);
+
+  function restore() {
+    pending = false;
+    var sc = scroller();
+    if (!sc || saved <= 0) return;
+    if (Math.abs(sc.scrollTop - saved) <= 1) return;
+    var max = sc.scrollHeight - sc.clientHeight;
+    sc.scrollTop = saved > max ? max : saved;
+    // 恢复自身触发的 scroll 事件也落在保护窗口内，不会反写 saved
+    guardUntil = Date.now() + 200;
+  }
+
+  function onMutations(mutations) {
+    var sb = document.getElementById('sidebar');
+    if (!sb) return;
+    for (var i = 0; i < mutations.length; i++) {
+      var t = mutations[i].target;
+      if (t === sb || (t.nodeType === 1 && sb.contains(t))) {
+        // 立刻进入保护窗口：DOM 塌缩钳位出的 scrollTop=0 事件不覆盖 saved
+        guardUntil = Date.now() + 200;
+        if (!pending) {
+          pending = true;
+          window.requestAnimationFrame(restore);
+        }
+        return;
+      }
+    }
+  }
+
+  function start() {
+    if (typeof MutationObserver === 'undefined' || !document.body) return;
+    new MutationObserver(onMutations).observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start);
+})();

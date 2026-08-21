@@ -8393,6 +8393,15 @@
           , c = n("t3Un");
         n("miYZ");
         var msg = n("tsqr");
+        var STYLE_ID = "v2b-oauth-manage-style";
+        function ensureStyles() {
+            if (document.getElementById(STYLE_ID))
+                return;
+            var style = document.createElement("style");
+            style.id = STYLE_ID;
+            style.textContent = ".v2b-oauth-manage .v2b-oauth-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}.v2b-oauth-manage .v2b-oauth-table{min-width:1180px;width:100%}.v2b-oauth-manage .v2b-oauth-table th{white-space:nowrap}.v2b-oauth-manage .v2b-oauth-table td{vertical-align:top}.v2b-oauth-manage .v2b-oauth-col-user{min-width:190px}.v2b-oauth-manage .v2b-oauth-col-provider{min-width:90px}.v2b-oauth-manage .v2b-oauth-col-external{min-width:150px}.v2b-oauth-manage .v2b-oauth-col-info{min-width:140px}.v2b-oauth-manage .v2b-oauth-col-plan{min-width:185px}.v2b-oauth-manage .v2b-oauth-col-online{min-width:175px}.v2b-oauth-manage .v2b-oauth-col-status{min-width:72px}.v2b-oauth-manage .v2b-oauth-col-actions{min-width:210px}.v2b-oauth-manage .v2b-oauth-cell-plan,.v2b-oauth-manage .v2b-oauth-cell-online,.v2b-oauth-manage .v2b-oauth-cell-status{white-space:nowrap}.v2b-oauth-manage .v2b-oauth-actions{white-space:normal}.v2b-oauth-manage .v2b-oauth-actions-inner{display:flex;flex-wrap:wrap;gap:4px;max-width:240px}.v2b-oauth-manage .v2b-oauth-actions-inner .btn{margin:0;padding:.15rem .5rem;font-size:12px;line-height:1.5;white-space:nowrap}";
+            document.head.appendChild(style)
+        }
         function adminEndpoint(path) {
             var secure = window.settings && window.settings.secure_path ? window.settings.secure_path : "";
             return "/" + (secure ? secure + "/" : "") + String(path || "").replace(/^\/+/, "")
@@ -8443,6 +8452,7 @@
                 this.loadPlans = this.loadPlans.bind(this)
             }
             componentDidMount() {
+                ensureStyles();
                 this.loadPlans();
                 this.load()
             }
@@ -8869,10 +8879,26 @@
                 }, "OAuth 绑定列表"), a.a.createElement("div", {
                     className: "block-options text-muted font-size-sm"
                 }, "共 ", this.state.total, " 个用户 · 同一用户的多平台绑定合并显示")), a.a.createElement("div", {
-                    className: "card-body p-0 table-responsive"
+                    className: "card-body p-0 table-responsive v2b-oauth-table-wrap"
                 }, a.a.createElement("table", {
                     className: "table table-striped table-vcenter table-hover mb-0 v2b-oauth-table"
-                }, a.a.createElement("thead", null, a.a.createElement("tr", null, a.a.createElement("th", null, "用户"), a.a.createElement("th", null, "平台"), a.a.createElement("th", null, "外部ID"), a.a.createElement("th", null, "第三方信息"), a.a.createElement("th", null, "套餐/流量"), a.a.createElement("th", null, "在线/设备"), a.a.createElement("th", null, "状态"), a.a.createElement("th", null, "操作"))), a.a.createElement("tbody", null, rows.length ? rows.map(function(row) {
+                }, a.a.createElement("thead", null, a.a.createElement("tr", null, a.a.createElement("th", {
+                    className: "v2b-oauth-col-user"
+                }, "用户"), a.a.createElement("th", {
+                    className: "v2b-oauth-col-provider"
+                }, "平台"), a.a.createElement("th", {
+                    className: "v2b-oauth-col-external"
+                }, "外部ID"), a.a.createElement("th", {
+                    className: "v2b-oauth-col-info"
+                }, "第三方信息"), a.a.createElement("th", {
+                    className: "v2b-oauth-col-plan"
+                }, "套餐/流量"), a.a.createElement("th", {
+                    className: "v2b-oauth-col-online"
+                }, "在线/设备"), a.a.createElement("th", {
+                    className: "v2b-oauth-col-status"
+                }, "状态"), a.a.createElement("th", {
+                    className: "v2b-oauth-col-actions"
+                }, "操作"))), a.a.createElement("tbody", null, rows.length ? rows.map(function(row) {
                     var bindings = (row.bindings && row.bindings.length) ? row.bindings : [{
                         id: row.binding_id || row.id,
                         binding_id: row.binding_id || row.id,
@@ -8927,11 +8953,15 @@
                         }, a.a.createElement("div", null, binding.provider_username || "-"), a.a.createElement("div", {
                             className: "text-muted font-size-sm"
                         }, binding.provider_email || ""))
-                    })), a.a.createElement("td", null, a.a.createElement("div", null, row.plan_name || "无订阅"), a.a.createElement("div", {
+                    })), a.a.createElement("td", {
+                        className: "v2b-oauth-cell-plan"
+                    }, a.a.createElement("div", null, row.plan_name || "无订阅"), a.a.createElement("div", {
                         className: "text-muted font-size-sm"
                     }, formatBytes(row.total_used), " / ", formatBytes(row.transfer_enable)), a.a.createElement("div", {
                         className: "text-muted font-size-sm"
-                    }, "到期: ", formatTime(row.expired_at))), a.a.createElement("td", null, a.a.createElement("div", {
+                    }, "到期: ", formatTime(row.expired_at))), a.a.createElement("td", {
+                        className: "v2b-oauth-cell-online"
+                    }, a.a.createElement("div", {
                         className: "mb-1"
                     }, isOnline ? a.a.createElement("span", {
                         className: "badge badge-success"
@@ -8950,15 +8980,19 @@
                         className: "text-muted font-size-sm"
                     }, "无在线 IP"), row.last_login_at ? a.a.createElement("div", {
                         className: "text-muted font-size-sm"
-                    }, "最近登录: ", formatTime(row.last_login_at)) : null), a.a.createElement("td", null, Number(row.banned) === 1 ? a.a.createElement("span", {
+                    }, "最近登录: ", formatTime(row.last_login_at)) : null), a.a.createElement("td", {
+                        className: "v2b-oauth-cell-status"
+                    }, Number(row.banned) === 1 ? a.a.createElement("span", {
                         className: "badge badge-danger"
                     }, "已封禁") : a.a.createElement("span", {
                         className: "badge badge-success"
                     }, "正常")), a.a.createElement("td", {
-                        className: "text-nowrap"
+                        className: "v2b-oauth-actions"
+                    }, a.a.createElement("div", {
+                        className: "v2b-oauth-actions-inner"
                     }, a.a.createElement("button", {
                         type: "button",
-                        className: "btn btn-sm btn-alt-primary mr-1 mb-1",
+                        className: "btn btn-sm btn-alt-primary",
                         onClick: function() {
                             self.openEdit(row)
                         }
@@ -8966,7 +9000,7 @@
                         return a.a.createElement("button", {
                             key: "u-" + binding.id,
                             type: "button",
-                            className: "btn btn-sm btn-alt-warning mr-1 mb-1",
+                            className: "btn btn-sm btn-alt-warning",
                             title: "解绑 " + (binding.provider_name || binding.provider),
                             onClick: function() {
                                 self.doUnbind({
@@ -8979,28 +9013,28 @@
                         }, "解绑", bindings.length > 1 ? (" " + (binding.provider_name || binding.provider)) : "")
                     }), a.a.createElement("button", {
                         type: "button",
-                        className: "btn btn-sm btn-alt-secondary mr-1 mb-1",
+                        className: "btn btn-sm btn-alt-secondary",
                         onClick: function() {
                             self.doResetSecret(row)
                         }
                     }, "重置密钥"), a.a.createElement("button", {
                         type: "button",
-                        className: "btn btn-sm btn-alt-danger mr-1 mb-1",
+                        className: "btn btn-sm btn-alt-danger",
                         onClick: function() {
                             self.doBan(row)
                         }
                     }, "封禁"), row.is_oauth_managed ? a.a.createElement("button", {
                         type: "button",
-                        className: "btn btn-sm btn-danger mb-1",
+                        className: "btn btn-sm btn-danger",
                         onClick: function() {
                             self.doDelete(row)
                         }
                     }, "删除") : a.a.createElement("button", {
                         type: "button",
-                        className: "btn btn-sm btn-alt-secondary mb-1",
+                        className: "btn btn-sm btn-alt-secondary",
                         title: "邮箱用户请到用户管理删除账号",
                         disabled: true
-                    }, "删除(用户管理)")))
+                    }, "删除(用户管理)"))))
                 }) : a.a.createElement("tr", null, a.a.createElement("td", {
                     colSpan: 8,
                     className: "text-center text-muted py-4"
@@ -34977,9 +35011,10 @@
                                 send_email_mass: "\u90ae\u4ef6\u7fa4\u53d1\u961f\u5217",
                                 send_telegram: "Telegram\u6d88\u606f\u961f\u5217",
                                 stat: "\u7edf\u8ba1\u961f\u5217",
-                                traffic_fetch: "\u6d41\u91cf\u6d88\u8d39\u961f\u5217"
+                                traffic_fetch: "\u6d41\u91cf\u6d88\u8d39\u961f\u5217",
+                                send_web_push: "\u6d4f\u89c8\u5668\u63a8\u9001\u961f\u5217"
                             };
-                            return t[e]
+                            return t[e] || e
                         }
                     }, {
                         title: "\u4f5c\u4e1a\u91cf",
@@ -98505,7 +98540,7 @@
                     span: 6
                 }, "\u8ba2\u5355\u5468\u671f"), g.a.createElement(S["a"], {
                     span: 18
-                }, y["a"].periodText[this.state.order.period])), g.a.createElement(E["a"], {
+                }, y["a"].periodText[this.state.order.period] || ("deposit" === this.state.order.period ? "\u5145\u503c" : this.state.order.period))), g.a.createElement(E["a"], {
                     gutter: [16, 16],
                     style: n
                 }, g.a.createElement(S["a"], {
@@ -98684,6 +98719,17 @@
                         }, e.substr(0, 3), "...", e.substr(-3)))
                     }
                 }, {
+                    title: "\u7528\u6237\u90ae\u7bb1",
+                    dataIndex: "user_email",
+                    key: "user_email",
+                    render: e=>{
+                        return g.a.createElement("span", {
+                            style: {
+                                whiteSpace: "nowrap"
+                            }
+                        }, e || "-")
+                    }
+                }, {
                     title: "\u7c7b\u578b",
                     dataIndex: "type",
                     key: "type",
@@ -98707,7 +98753,7 @@
                     key: "period",
                     align: "center",
                     render: (e,t)=>{
-                        return g.a.createElement(p["a"], null, y["a"].periodText[t.period])
+                        return g.a.createElement(p["a"], null, y["a"].periodText[t.period] || ("deposit" === t.period ? "\u5145\u503c" : t.period))
                     }
                 }, {
                     title: "\u652f\u4ed8\u91d1\u989d",

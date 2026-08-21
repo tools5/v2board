@@ -19,6 +19,9 @@ class UserRoute
             $router->post('/oauth/bind', 'V1\\User\\OauthController@bind');
             $router->post('/oauth/telegram', 'V1\\User\\OauthController@telegramBind');
             $router->post('/oauth/unbind', 'V1\\User\\OauthController@unbind');
+            // 客户端应用使用 XBoard 风格的路径参数形式
+            $router->post('/oauth/{provider}/bind', 'V1\\User\\OauthController@bind');
+            $router->post('/oauth/{provider}/unbind', 'V1\\User\\OauthController@unbind');
             $router->get ('/resetSecurity', 'V1\\User\\UserController@resetSecurity');
             $router->get ('/info', 'V1\\User\\UserController@info');
             $router->post('/newPeriod', 'V1\\User\\UserController@newPeriod');

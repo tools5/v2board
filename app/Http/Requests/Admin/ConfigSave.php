@@ -125,6 +125,8 @@ class ConfigSave extends FormRequest
         'password_limit_enable' => 'in:0,1',
         'password_limit_count' => 'integer',
         'password_limit_expire' => 'integer',
+        // 应用内 OAuth 允许深链回调的自定义 scheme 白名单（逗号分隔，需与客户端 XBCLIENT_OAUTH_CALLBACK_SCHEME 一致）
+        'oauth_app_scheme' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z][A-Za-z0-9+.\-]*([,\s]+[A-Za-z][A-Za-z0-9+.\-]*)*$/'],
     ];
 
     public static function allRules(): array

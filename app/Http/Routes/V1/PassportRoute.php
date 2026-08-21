@@ -25,6 +25,8 @@ class PassportRoute
             // 第三方登录
             $router->get('/auth/oauth/providers', 'V1\\Passport\\OauthController@providers');
             $router->get('/auth/oauth/redirect', 'V1\\Passport\\OauthController@redirect');
+            // 客户端应用使用 XBoard 风格的路径参数形式
+            $router->get('/auth/oauth/{provider}/redirect', 'V1\\Passport\\OauthController@redirect');
             $router->get('/auth/oauth/callback', 'V1\\Passport\\OauthController@callback');
             $router->post('/auth/oauth/telegram', 'V1\\Passport\\OauthController@telegram');
             // Comm

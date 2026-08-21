@@ -49,7 +49,7 @@ class OauthService
         abort(500, '第三方登录数据表缺失，请执行 php artisan migrate 或导入 database/update_oauth.sql');
     }
 
-    public function buildAuthorizeUrl(string $provider, string $mode = 'login', ?int $userId = null, ?string $inviteCode = null, bool $isPopup = false): string
+    public function buildAuthorizeUrl(string $provider, string $mode = 'login', ?int $userId = null, ?string $inviteCode = null, bool $isPopup = false, ?array $app = null): string
     {
         self::ensureTableExists();
         $meta = OauthProviderRegistry::get($provider);
@@ -66,12 +66,19 @@ class OauthService
         $normalizedInviteCode = $this->normalizeInviteCodeInput($inviteCode);
 
         $state = Helper::guid();
+        if ($app !== null && ($app['state'] ?? null) === null) {
+            // 客户端未自带 state 时回传服务端 state（Android 绑定流程从 authorize_url 取 state 校验深链）
+            // 注意不能用 empty()：客户端传 state=0 也是合法值，不能被覆盖
+            $app['state'] = $state;
+        }
         Cache::put(CacheKey::get('OAUTH_STATE', $state), [
             'provider' => $provider,
             'mode' => $mode,
             'user_id' => $userId,
             'invite_code' => $normalizedInviteCode,
             'popup' => $isPopup,
+            // 客户端应用内登录时为 ['scheme' => 深链 scheme, 'state' => 客户端自带的防伪 state]
+            'app' => $app,
             'created_at' => time(),
         ], 600);
 
@@ -170,7 +177,11 @@ class OauthService
             'mode' => 'login',
             'user' => $user,
             'is_new' => $this->lastUserWasCreated,
-            'auth' => (new AuthService($user))->generateAuthData($request, 'oauth:' . strtolower((string)$provider)),
+            // 仅弹窗流程在回调里直接发凭证；跳转/深链流程都走一次性 verify 码，
+            // 提前生成只会留下一个客户端永远拿不到的无主会话（app 上下文存在时深链优先于弹窗）
+            'auth' => !empty($stateData['popup']) && empty($stateData['app'])
+                ? (new AuthService($user))->generateAuthData($request, 'oauth:' . strtolower((string)$provider))
+                : null,
             'popup' => !empty($stateData['popup']),
         ];
     }
@@ -1184,8 +1195,7 @@ class OauthService
 
     public function createLoginRedirect(User $user, ?string $redirect = 'dashboard', array $extraQuery = []): string
     {
-        $code = Helper::guid();
-        Cache::put(CacheKey::get('TEMP_TOKEN', $code), $user->id, 120);
+        $code = $this->createLoginVerifyCode($user);
         // Extra state is internal, while verify and redirect remain non-overridable.
         $query = array_merge($extraQuery, [
             'verify' => $code,
@@ -1194,5 +1204,64 @@ class OauthService
         $path = '/#/login?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
 
         return ConfiguredUrl::applicationPathUrl($path);
+    }
+
+    /**
+     * 生成一次性登录码（token2Login 的 verify 参数），应用深链和网页跳转共用。
+     */
+    public function createLoginVerifyCode(User $user): string
+    {
+        $code = Helper::guid();
+        Cache::put(CacheKey::get('TEMP_TOKEN', $code), $user->id, 120);
+        return $code;
+    }
+
+    /**
+     * 解析客户端应用内 OAuth 的回调上下文（app_scheme + 客户端防伪 state）。
+     * scheme 必须在后台「登录设置」的 oauth_app_scheme 白名单内，
+     * 否则任意 App 都能通过伪造链接把一次性登录码骗到自己手里。
+     */
+    public static function resolveAppContext(Request $request): ?array
+    {
+        $scheme = trim((string)$request->input('app_scheme', ''));
+        if ($scheme === '') {
+            return null;
+        }
+        if (!preg_match('/^[A-Za-z][A-Za-z0-9+.\-]*$/', $scheme)) {
+            abort(400, 'app_scheme 格式无效');
+        }
+        $scheme = strtolower($scheme);
+        // 浏览器保留 scheme 不允许作为应用深链（即使管理员误配进白名单）
+        if (in_array($scheme, ['http', 'https', 'javascript', 'data', 'file', 'blob', 'vbscript', 'about'], true)) {
+            abort(400, 'app_scheme 不能使用浏览器保留 scheme');
+        }
+        $allowed = preg_split('/[,\s]+/', strtolower((string)config('v2board.oauth_app_scheme', '')), -1, PREG_SPLIT_NO_EMPTY);
+        if (!in_array($scheme, $allowed, true)) {
+            abort(403, '应用回调 scheme 未在后台登录设置中配置');
+        }
+        $clientState = trim((string)$request->input('state', ''));
+        return [
+            'scheme' => $scheme,
+            'state' => $clientState !== '' ? $clientState : null,
+        ];
+    }
+
+    /**
+     * 只读取（不消费）state 里的应用回调上下文。
+     * handleCallback 会 pull 掉 state，而异常分支也需要把错误深链回应用，
+     * 所以回调入口先用本方法窥探。
+     */
+    public static function peekAppContext($state): ?array
+    {
+        $state = is_string($state) ? trim($state) : '';
+        if ($state === '') {
+            return null;
+        }
+        $data = Cache::get(CacheKey::get('OAUTH_STATE', $state));
+        $app = is_array($data) ? ($data['app'] ?? null) : null;
+        if (!is_array($app) || empty($app['scheme']) || !is_string($app['scheme'])) {
+            return null;
+        }
+        return $app;
     }
 }

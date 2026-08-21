@@ -24,9 +24,11 @@ class OauthController extends Controller
         ]);
     }
 
-    public function bind(Request $request)
+    public function bind(Request $request, $provider = null)
     {
-        $provider = (string)$request->input('provider', '');
+        // 兼容两种调用形式：/user/oauth/{provider}/bind（客户端应用）与 /user/oauth/bind + body provider（网页）
+        $fromPath = is_string($provider) && $provider !== '';
+        $provider = (string)($fromPath ? $provider : $request->input('provider', ''));
         if ($provider === '') {
             abort(500, '请指定要绑定的平台');
         }
@@ -41,10 +43,12 @@ class OauthController extends Controller
             'bind',
             (int)$request->user['id'],
             null,
-            $isPopup
+            $isPopup,
+            OauthService::resolveAppContext($request)
         );
         return response([
-            'data' => $url,
+            // 路径参数形式是 XBoard 风格，客户端应用期望 {data:{authorize_url}}
+            'data' => $fromPath ? ['authorize_url' => $url] : $url,
         ]);
     }
 
@@ -78,9 +82,10 @@ class OauthController extends Controller
         ]);
     }
 
-    public function unbind(Request $request)
+    public function unbind(Request $request, $provider = null)
     {
-        $provider = (string)$request->input('provider', '');
+        // 兼容两种调用形式：/user/oauth/{provider}/unbind（客户端应用）与 /user/oauth/unbind + body provider（网页）
+        $provider = (string)((is_string($provider) && $provider !== '') ? $provider : $request->input('provider', ''));
         if ($provider === '') {
             abort(500, '请指定要解绑的平台');
         }

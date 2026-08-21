@@ -209,6 +209,8 @@ class ConfigController extends Controller
             // 登录设置：统一管理第三方登录（可继续扩展 GitHub / Google 等）
             'login' => [
                 'providers' => OauthProviderRegistry::adminProviderList(),
+                // 应用内 OAuth 深链回调 scheme 白名单（逗号分隔）
+                'oauth_app_scheme' => config('v2board.oauth_app_scheme'),
             ]
         ];
         if ($key && isset($data[$key])) {

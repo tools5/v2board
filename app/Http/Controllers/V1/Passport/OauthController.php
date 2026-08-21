@@ -20,9 +20,10 @@ class OauthController extends Controller
         ]);
     }
 
-    public function redirect(Request $request)
+    public function redirect(Request $request, $provider = null)
     {
-        $provider = (string)$request->input('provider', '');
+        // 兼容两种调用形式：/auth/oauth/{provider}/redirect（客户端应用）与 /auth/oauth/redirect?provider=（网页）
+        $provider = (string)($provider ?? $request->input('provider', ''));
         if ($provider === '') {
             abort(500, '请指定登录平台');
         }
@@ -38,7 +39,8 @@ class OauthController extends Controller
             'login',
             null,
             is_string($inviteCode) ? $inviteCode : null,
-            $isPopup
+            $isPopup,
+            OauthService::resolveAppContext($request)
         );
         return redirect()->away($url);
     }
@@ -54,17 +56,25 @@ class OauthController extends Controller
         }
 
         $oauthService = new OauthService();
+        // handleCallback 会消费 state，先窥探应用回调上下文，异常时才能把错误深链回应用
+        $app = OauthService::peekAppContext($request->input('state'));
 
         try {
             $result = $oauthService->handleCallback($provider, $request);
         } catch (\Throwable $exception) {
             $message = $exception->getMessage() ?: '第三方登录失败';
+            if ($app) {
+                return $this->appDeepLinkResponse($app, ['oauth_error' => $message]);
+            }
             return $this->popupOrRedirectOnError($message);
         }
 
         $isPopup = !empty($result['popup']);
 
         if (($result['mode'] ?? '') === 'bind') {
+            if ($app) {
+                return $this->appDeepLinkResponse($app, ['oauth_success' => '绑定成功']);
+            }
             if ($isPopup) {
                 return $this->popupPostMessage(['type' => 'bind', 'success' => true]);
             }
@@ -72,9 +82,14 @@ class OauthController extends Controller
         }
 
         $user = $result['user'];
-        $authData = $result['auth'] ?? (new AuthService($user))->generateAuthData($request, 'oauth:' . strtolower((string)$provider));
+
+        if ($app) {
+            // 客户端拿到 verify 后调 token2Login 换取 auth_data
+            return $this->appDeepLinkResponse($app, ['verify' => $oauthService->createLoginVerifyCode($user)]);
+        }
 
         if ($isPopup) {
+            $authData = $result['auth'] ?? (new AuthService($user))->generateAuthData($request, 'oauth:' . strtolower((string)$provider));
             // 弹窗登录需回传完整凭证，主题侧用 token + auth_data 完成会话
             return $this->popupPostMessage([
                 'type' => 'login',
@@ -139,6 +154,36 @@ class OauthController extends Controller
             }
         }
         return $payload;
+    }
+
+    /**
+     * 通过深链把结果带回客户端应用。host 固定为 oauth（Android intent-filter 按 scheme+host 匹配）。
+     * 用 HTML 中转而不是 302：部分浏览器/WebView 会拦截无用户手势的自定义 scheme 跳转，
+     * 页面里保留手动链接兜底。
+     */
+    private function appDeepLinkResponse(array $app, array $params)
+    {
+        if (($app['state'] ?? null) !== null && $app['state'] !== '') {
+            $params['state'] = $app['state'];
+        }
+        $url = $app['scheme'] . '://oauth?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        $jsonUrl = $this->jsonForScript($url);
+        $htmlUrl = $this->escapeHtml($url);
+        $html = <<<HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>返回应用...</title></head>
+<body>
+<script>
+(function() {
+    location.href = {$jsonUrl};
+})();
+</script>
+<p style="text-align:center;margin-top:40px;">正在返回应用，如未自动跳转请<a href="{$htmlUrl}">点击这里</a>，完成后可关闭此页面。</p>
+</body>
+</html>
+HTML;
+        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     private function redirectWithMessage(string $message, bool $isError = false, string $fallbackPath = '/#/login')

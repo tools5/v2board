@@ -51,6 +51,9 @@ class Kernel extends ConsoleKernel
         // reset
         $schedule->command('reset:traffic')->daily();
         $schedule->command('reset:log')->daily();
+        // 客户端 Release 镜像：面板服务器能直连 GitHub，把安装包镜像到 public/clients/
+        // 供国内客户端应用内更新。错开整点，避免与 audit:ip-link 挤同一时段 I/O。
+        $schedule->command('client:sync-releases')->hourlyAt(15)->withoutOverlapping();
         // send
         $schedule->command('send:remindMail')->dailyAt('11:30');
         // browser push: plan expire / traffic warn

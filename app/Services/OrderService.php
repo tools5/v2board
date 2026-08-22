@@ -353,9 +353,9 @@ class OrderService
         return $this->paymentRecorded;
     }
 
-    public function cancel():bool
+    public function cancel(bool $force = false): bool
     {
-        return DB::transaction(function () {
+        return DB::transaction(function () use ($force) {
             $order = Order::where('id', $this->order->id)->lockForUpdate()->first();
             if (!$order) {
                 return false;
@@ -365,7 +365,12 @@ class OrderService
             if ((int) $order->status === self::STATUS_CANCELLED) {
                 return true;
             }
-            if ((int) $order->status !== self::STATUS_PENDING || $order->payment_id !== null) {
+            if ((int) $order->status !== self::STATUS_PENDING) {
+                return false;
+            }
+            // 选过支付方式(payment_id 已写入)的订单默认不许取消，防止网关侧支付完成后回调落空；
+            // 管理员手动标记取消是明确操作，传 $force 跳过该限制（取消后回调会因订单非待支付而拒绝入账）
+            if (!$force && $order->payment_id !== null) {
                 return false;
             }
 

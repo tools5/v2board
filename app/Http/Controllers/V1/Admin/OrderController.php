@@ -116,7 +116,7 @@ class OrderController extends Controller
         if ($order->status !== 0) abort(500, '只能对待支付的订单进行操作');
 
         $orderService = new OrderService($order);
-        if (!$orderService->cancel()) {
+        if (!$orderService->cancel(true)) {
             abort(500, '更新失败');
         }
         return response([
